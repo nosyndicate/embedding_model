@@ -1,0 +1,22 @@
+# Span Corruption (T5-style) collator configuration
+_target_: embedding_trainer.data.collators.span_corruption.SpanCorruptionCollator
+
+config:
+  _target_: embedding_trainer.data.collators.span_corruption.SpanCorruptionCollatorConfig
+  noise_density: 0.15         # Fraction of tokens to corrupt
+  mean_span_length: 3.0       # Average span length
+
+  # Sentinel tokens (for span placeholders)
+  sentinel_start_id: 30000    # First sentinel token ID
+  num_sentinels: 100          # Number of available sentinels
+
+  decoder_start_token_id: 0
+
+  # BERT special token IDs
+  pad_token_id: 0
+  cls_token_id: 101
+  sep_token_id: 102
+  mask_token_id: 103
+  vocab_size: 30522
+
+  pad_to_multiple_of: 8

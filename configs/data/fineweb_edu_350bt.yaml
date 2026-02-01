@@ -1,0 +1,6 @@
+# FineWeb-Edu 350B tokens (pre-tokenized)
+defaults:
+  - pretokenized
+
+config:
+  data_dir: "${hydra:runtime.cwd}/data/fineweb_edu_350bt"

@@ -1,0 +1,8 @@
+# MLM with Whole Word Masking
+# Masks entire words instead of subword tokens
+defaults:
+  - mlm
+
+# Note: Whole Word Masking requires additional implementation
+# This config serves as a placeholder for future extension
+# The collator would need to track word boundaries from tokenization

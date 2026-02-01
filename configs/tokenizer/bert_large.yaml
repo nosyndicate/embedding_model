@@ -1,0 +1,7 @@
+# BERT large tokenizer configuration
+# Same tokenizer as bert-base, just for organizational clarity
+defaults:
+  - bert_base
+
+# BERT large uses the same vocabulary as BERT base
+tokenizer_name_or_path: "bert-large-uncased"
