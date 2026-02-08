@@ -9,7 +9,6 @@ import torch
 from torch import nn
 
 from embedding_trainer.data.base import CollatorProtocol
-from embedding_trainer.data.collators.base import BaseCollatorConfig
 from embedding_trainer.data.collators.mlm import MLMCollator, MLMCollatorConfig
 from embedding_trainer.data.datasets.pretokenized import ShardHeader
 from embedding_trainer.eval.base import BaseEvalTask

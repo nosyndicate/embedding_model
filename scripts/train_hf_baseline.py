@@ -163,7 +163,14 @@ def main() -> None:
         "--lr_scheduler_type",
         type=str,
         default="linear",
-        choices=["linear", "cosine", "cosine_with_restarts", "polynomial", "constant", "constant_with_warmup"],
+        choices=[
+            "linear",
+            "cosine",
+            "cosine_with_restarts",
+            "polynomial",
+            "constant",
+            "constant_with_warmup",
+        ],
         help="Learning rate scheduler type",
     )
     parser.add_argument(
@@ -243,9 +250,7 @@ def main() -> None:
     logger.info(
         f"Packing mode: {args.packing_mode}, Sampling strategy: {args.sampling_strategy}"
     )
-    logger.info(
-        f"LR: {args.learning_rate}, Scheduler: {args.lr_scheduler_type}"
-    )
+    logger.info(f"LR: {args.learning_rate}, Scheduler: {args.lr_scheduler_type}")
 
     if train_dataset.header is None:
         raise RuntimeError("Failed to read shard header from data")
@@ -295,7 +300,9 @@ def main() -> None:
         logger.info(f"Using warmup_steps: {args.warmup_steps}")
     else:
         training_args_kwargs["warmup_ratio"] = args.warmup_ratio
-        logger.info(f"Using warmup_ratio: {args.warmup_ratio} ({int(args.max_steps * args.warmup_ratio)} steps)")
+        logger.info(
+            f"Using warmup_ratio: {args.warmup_ratio} ({int(args.max_steps * args.warmup_ratio)} steps)"
+        )
 
     training_args = TrainingArguments(**training_args_kwargs)
 

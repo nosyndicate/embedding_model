@@ -5,11 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
-import torch
 from torch import Tensor
 
 if TYPE_CHECKING:
-    from torch.optim import Optimizer
+    pass
 
 
 @dataclass

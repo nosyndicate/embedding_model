@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
 
 import torch
+from tokenizers import Tokenizer
+from torch import Tensor
 
 from embedding_trainer.data.base import PreTokenizedBatch
 from embedding_trainer.data.collators.base import BaseCollator, BaseCollatorConfig
@@ -16,10 +17,18 @@ from embedding_trainer.data.registry import COLLATOR_REGISTRY
 class MLMCollatorConfig(BaseCollatorConfig):
     """Configuration for MLM collator."""
 
-    mlm_probability: float = 0.15
-    mask_replace_prob: float = 0.8  # Probability of replacing with [MASK]
-    random_replace_prob: float = 0.1  # Probability of replacing with random token
-    # Remaining probability (0.1) keeps original token
+    mlm_probability: float = 0.30  # Probability of replacing with [MASK]
+
+    @staticmethod
+    def from_tokenizer(tokenizer: Tokenizer) -> MLMCollatorConfig:
+        """Create config from a Hugging Face Tokenizer."""
+        return MLMCollatorConfig(
+            pad_token_id=tokenizer.token_to_id(tokenizer.pad_token),
+            cls_token_id=tokenizer.token_to_id(tokenizer.cls_token),
+            sep_token_id=tokenizer.token_to_id(tokenizer.sep_token),
+            mask_token_id=tokenizer.token_to_id(tokenizer.mask_token),
+            vocab_size=tokenizer.get_vocab_size(),
+        )
 
 
 @COLLATOR_REGISTRY.register("mlm")
@@ -27,21 +36,16 @@ class MLMCollator(BaseCollator):
     """
     Collator for Masked Language Modeling (MLM).
 
-    Implements BERT-style masking:
-    - 15% of tokens are selected for prediction
-    - Of those: 80% replaced with [MASK], 10% with random token, 10% unchanged
+    - 30% of tokens are selected for prediction,
+        - See https://arxiv.org/pdf/2202.08005
     - Special tokens ([CLS], [SEP], [PAD]) are never masked
     """
 
-    def __init__(self, config: MLMCollatorConfig | None = None) -> None:
-        if config is None:
-            config = MLMCollatorConfig()
+    def __init__(self, config: MLMCollatorConfig) -> None:
         super().__init__(config)
         self.mlm_probability = config.mlm_probability
-        self.mask_replace_prob = config.mask_replace_prob
-        self.random_replace_prob = config.random_replace_prob
 
-    def __call__(self, samples: list[dict[str, Any]]) -> PreTokenizedBatch:
+    def __call__(self, samples: list[dict[str, Tensor]]) -> PreTokenizedBatch:
         """
         Collate samples and apply MLM masking.
 
@@ -102,33 +106,6 @@ class MLMCollator(BaseCollator):
 
         # Set labels to -100 for non-masked tokens (will be ignored in loss)
         labels[~masked_indices] = -100
-
-        # Determine what to do with masked tokens
-        # 80% -> [MASK]
-        indices_replaced = (
-            torch.bernoulli(
-                torch.full(input_ids.shape, self.mask_replace_prob)
-            ).bool()
-            & masked_indices
-        )
-        input_ids[indices_replaced] = self.mask_token_id
-
-        # 10% -> random token
-        random_mask = (
-            torch.bernoulli(
-                torch.full(
-                    input_ids.shape,
-                    self.random_replace_prob / (1 - self.mask_replace_prob),
-                )
-            ).bool()
-            & masked_indices
-            & ~indices_replaced
-        )
-        random_tokens = torch.randint(
-            0, self.vocab_size, input_ids.shape, dtype=input_ids.dtype
-        )
-        input_ids[random_mask] = random_tokens[random_mask]
-
-        # 10% -> keep original (already done, since we cloned)
+        input_ids[masked_indices] = self.mask_token_id  # Default to [MASK]
 
         return input_ids, labels

@@ -3,21 +3,33 @@
 from __future__ import annotations
 
 import mmap
-from dataclasses import dataclass, field
+from collections.abc import Iterator
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 import numpy as np
 import torch
 from torch.utils.data import IterableDataset
 
-from embedding_trainer.data.base import ShardInfo
+from embedding_trainer.data.base import (
+    BERT_VERSION,
+    HEADER_SIZE,
+    MAGIC_NUMBER,
+    ShardHeader,
+    ShardInfo,
+)
 from embedding_trainer.data.registry import DATASET_REGISTRY
 
-# Shard format constants
-HEADER_SIZE = 256  # Number of int32 values in header
-MAGIC_NUMBER = 20240520
-BERT_VERSION = 2
+# Re-export for backward compatibility
+__all__ = [
+    "ShardHeader",
+    "HEADER_SIZE",
+    "MAGIC_NUMBER",
+    "BERT_VERSION",
+    "PreTokenizedConfig",
+    "PreTokenizedDataset",
+]
 
 
 @dataclass
@@ -39,7 +51,9 @@ class PreTokenizedConfig:
     # - "epoch_offset": Rotate starting offset each epoch (4x data variety)
     # - "random": Sample random offsets (same count, random positions)
     # - "shuffle_indices": Shuffle non-overlapping sequence indices
-    sampling_strategy: str = "fixed"  # "fixed" | "epoch_offset" | "random" | "shuffle_indices"
+    sampling_strategy: str = (
+        "fixed"  # "fixed" | "epoch_offset" | "random" | "shuffle_indices"
+    )
     num_offset_phases: int = 4  # for epoch_offset
 
     def __post_init__(self) -> None:
@@ -49,36 +63,13 @@ class PreTokenizedConfig:
         if self.packing_mode not in ("flat", "doc_aware"):
             raise ValueError(f"Invalid packing_mode: {self.packing_mode}")
 
-        if self.sampling_strategy not in ("fixed", "epoch_offset", "random", "shuffle_indices"):
+        if self.sampling_strategy not in (
+            "fixed",
+            "epoch_offset",
+            "random",
+            "shuffle_indices",
+        ):
             raise ValueError(f"Invalid sampling_strategy: {self.sampling_strategy}")
-
-
-@dataclass
-class ShardHeader:
-    """Header information from a shard file."""
-
-    magic: int
-    version: int
-    token_count: int
-    vocab_size: int
-    pad_id: int
-    cls_id: int
-    sep_id: int
-    mask_id: int
-
-    @classmethod
-    def from_array(cls, header: np.ndarray) -> ShardHeader:
-        """Parse header from numpy array."""
-        return cls(
-            magic=int(header[0]),
-            version=int(header[1]),
-            token_count=int(header[2]),
-            vocab_size=int(header[3]),
-            pad_id=int(header[4]),
-            cls_id=int(header[5]),
-            sep_id=int(header[6]),
-            mask_id=int(header[7]),
-        )
 
 
 @DATASET_REGISTRY.register("pretokenized")

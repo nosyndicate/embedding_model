@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import Any
 
 import torch
+from torch import Tensor
 
 from embedding_trainer.data.base import PreTokenizedBatch
 
@@ -15,12 +15,11 @@ from embedding_trainer.data.base import PreTokenizedBatch
 class BaseCollatorConfig:
     """Base configuration for collators."""
 
-    # BERT special token IDs
-    pad_token_id: int = 0  # [PAD]
-    cls_token_id: int = 101  # [CLS]
-    sep_token_id: int = 102  # [SEP]
-    mask_token_id: int = 103  # [MASK]
-    vocab_size: int = 30522  # bert-base-uncased
+    pad_token_id: int
+    cls_token_id: int
+    sep_token_id: int
+    mask_token_id: int
+    vocab_size: int
 
     # Padding configuration
     pad_to_multiple_of: int = 8  # Tensor core efficiency
@@ -46,7 +45,7 @@ class BaseCollator(ABC):
         }
 
     @abstractmethod
-    def __call__(self, samples: list[dict[str, Any]]) -> PreTokenizedBatch:
+    def __call__(self, samples: list[dict[str, Tensor]]) -> PreTokenizedBatch:
         """Collate samples into a batch."""
         ...
 
