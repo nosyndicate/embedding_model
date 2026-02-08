@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable
+from typing import Any
 
 import torch
-from torch.utils.data import DataLoader, IterableDataset
+from torch.utils.data import DataLoader, Dataset, IterableDataset
 
 from embedding_trainer.data.base import CollatorProtocol, DatasetProtocol
 
@@ -23,7 +24,7 @@ class DataLoaderConfig:
 
 
 def create_dataloader(
-    dataset: DatasetProtocol | IterableDataset,
+    dataset: DatasetProtocol | Dataset,
     collator: CollatorProtocol | Callable[[list[dict[str, Any]]], Any],
     config: DataLoaderConfig | None = None,
 ) -> DataLoader:
@@ -107,7 +108,7 @@ def create_distributed_dataloader(
         # Use DistributedSampler for map-style datasets
         from torch.utils.data.distributed import DistributedSampler
 
-        sampler = DistributedSampler(
+        sampler: DistributedSampler = DistributedSampler(
             dataset,
             num_replicas=world_size,
             rank=rank,

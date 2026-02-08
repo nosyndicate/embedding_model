@@ -2,11 +2,47 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterator, Protocol, TypedDict, runtime_checkable
+from typing import Any, Protocol, TypedDict, runtime_checkable
 
+import numpy as np
 import torch
+
+# Shard format constants
+HEADER_SIZE = 256  # Number of int32 values in header
+MAGIC_NUMBER = 20240520
+BERT_VERSION = 2
+ROBERTA_VERSION = 3
+
+
+@dataclass
+class ShardHeader:
+    """Header information from a shard file."""
+
+    magic: int
+    version: int
+    token_count: int
+    vocab_size: int
+    pad_id: int
+    cls_id: int
+    sep_id: int
+    mask_id: int
+
+    @classmethod
+    def from_array(cls, header: np.ndarray) -> ShardHeader:
+        """Parse header from numpy array."""
+        return cls(
+            magic=int(header[0]),
+            version=int(header[1]),
+            token_count=int(header[2]),
+            vocab_size=int(header[3]),
+            pad_id=int(header[4]),
+            cls_id=int(header[5]),
+            sep_id=int(header[6]),
+            mask_id=int(header[7]),
+        )
 
 
 @dataclass

@@ -106,9 +106,7 @@ class MLMCollator(BaseCollator):
         # Determine what to do with masked tokens
         # 80% -> [MASK]
         indices_replaced = (
-            torch.bernoulli(
-                torch.full(input_ids.shape, self.mask_replace_prob)
-            ).bool()
+            torch.bernoulli(torch.full(input_ids.shape, self.mask_replace_prob)).bool()
             & masked_indices
         )
         input_ids[indices_replaced] = self.mask_token_id

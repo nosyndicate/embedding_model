@@ -2,30 +2,28 @@
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 
 import numpy as np
 import pytest
 import torch
 
-from embedding_trainer.data.base import ShardInfo
-from embedding_trainer.data.registry import DATASET_REGISTRY, COLLATOR_REGISTRY
-from embedding_trainer.data.datasets.pretokenized import (
-    PreTokenizedConfig,
-    PreTokenizedDataset,
-    ShardHeader,
-    HEADER_SIZE,
-    MAGIC_NUMBER,
-    BERT_VERSION,
+from embedding_trainer.data.collators.electra import (
+    ELECTRACollator,
 )
 from embedding_trainer.data.collators.mlm import MLMCollator, MLMCollatorConfig
-from embedding_trainer.data.collators.electra import ELECTRACollator, ELECTRACollatorConfig
 from embedding_trainer.data.collators.span_corruption import (
     SpanCorruptionCollator,
-    SpanCorruptionCollatorConfig,
 )
-from embedding_trainer.data.loader import create_dataloader, DataLoaderConfig
+from embedding_trainer.data.datasets.pretokenized import (
+    BERT_VERSION,
+    HEADER_SIZE,
+    MAGIC_NUMBER,
+    PreTokenizedConfig,
+    PreTokenizedDataset,
+)
+from embedding_trainer.data.loader import DataLoaderConfig, create_dataloader
+from embedding_trainer.data.registry import COLLATOR_REGISTRY, DATASET_REGISTRY
 
 
 def create_test_shard(path: Path, num_tokens: int = 10000) -> None:
@@ -278,7 +276,9 @@ class TestSamplingStrategies:
 
         # Same set of sequences, different order
         assert len(samples_fixed) == len(samples_shuffled)
-        assert set(tuple(s) for s in samples_fixed) == set(tuple(s) for s in samples_shuffled)
+        assert set(tuple(s) for s in samples_fixed) == set(
+            tuple(s) for s in samples_shuffled
+        )
         # Order should be different (shuffled)
         assert samples_fixed != samples_shuffled
 

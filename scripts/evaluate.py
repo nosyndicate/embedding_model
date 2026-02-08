@@ -31,7 +31,7 @@ from embedding_trainer.data.datasets.pretokenized import (
     PreTokenizedConfig,
     PreTokenizedDataset,
 )
-from embedding_trainer.eval import EVAL_TASK_REGISTRY, EvalResult, load_model
+from embedding_trainer.eval import EVAL_TASK_REGISTRY, load_model
 
 logging.basicConfig(
     level=logging.INFO,
@@ -222,7 +222,9 @@ def main() -> int:
             num_samples += batch["input_ids"].size(0)
 
             if (batch_idx + 1) % 100 == 0:
-                logger.info(f"Processed {batch_idx + 1} batches ({num_samples} samples)")
+                logger.info(
+                    f"Processed {batch_idx + 1} batches ({num_samples} samples)"
+                )
 
     elapsed = time.time() - start_time
     logger.info(f"Evaluation completed in {elapsed:.2f}s")

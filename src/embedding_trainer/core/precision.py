@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Generator
 from contextlib import contextmanager
-from typing import TYPE_CHECKING, Generator
+from typing import TYPE_CHECKING
 
 import torch
 from torch import Tensor
@@ -151,4 +152,6 @@ def get_precision_context(precision: str) -> PrecisionContext:
     elif precision == "bf16":
         return BF16Precision()
     else:
-        raise ValueError(f"Unknown precision: {precision}. Use 'fp32', 'fp16', or 'bf16'.")
+        raise ValueError(
+            f"Unknown precision: {precision}. Use 'fp32', 'fp16', or 'bf16'."
+        )

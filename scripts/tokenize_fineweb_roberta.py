@@ -1,39 +1,53 @@
 #!/usr/bin/env python3
 """
-Pre-tokenization script for FineWeb-Edu dataset using BERT tokenizer.
+Pre-tokenization script for FineWeb-Edu dataset (RoBERTa-style).
 
-This script downloads FineWeb-Edu from HuggingFace, tokenizes all documents
-using the BERT tokenizer, and writes the tokens to binary shard files for
-efficient training.
+Produces a flat token stream with [SEP] as document boundary markers.
+No [CLS] tokens are inserted. The resulting shards are sequence-length-agnostic:
+the same pre-tokenized data can be used with any max_seq_length at training time.
 
-Run tests:
-    # Run all tests
-    python -m pytest tests/ -v --override-ini="addopts="
+We usually do not need BOS tokens, in BERT, this is [CLS], in RoBERTa, this is <s>.
+We only need EOS tokens, in BERT, this is [SEP], in RoBERTa, this is </s> as boundary markers.
 
-    # Run specific test file
-    python -m pytest tests/test_data_pipeline.py -v --override-ini="addopts="
+The script is designed to satisfy the following conditions:
+- Pretokenize once only but support different seq length samples
+- Allow cross document boundaries
+- Support dynamic masking
 
+Specifically, when we say allow cross document boundaries (FULL SENTENCE method in RoBERTa), we mean two situations
+- A sample may contain multiple documents
+  - No strong evidence suggest that attention cross the document boundary would hurt the result on short sequences.
+    Longer sequence might suffer from the packing multiple documents into a single sample (Llama 3).
+  - Since we allow allow attention to cross document boundaries, we don't need to reset position id between documents.
+  - In future, we can try to implement diagonal attention makes to prevent attention across different documents.
+
+- A document can span two samples
+  - This means we don't pad at the end of a sample, instead, we break the next document into two piece and have
+    the first part in the current sample and the remainder in the next sample.
+  - The next sample might lose some context since the first part of the document is in the previous sample.
+  - This is mostly a computation resouce optimization.
+  - But always have the position 0 being the first token of a document might introduce unintended biases.
+  - To avoid the concern of losing context, we can do two things:
+    - Shift segmentation each epoch: instead of always using windows aligned to the same boundaries, use a random
+      global offset per epoch (step)
+    - Use a small overlap (stride < seq_len)
 Usage:
-    python scripts/tokenize_fineweb.py --version 10B --output_dir data/fineweb_edu_10bt
-    python scripts/tokenize_fineweb.py --version 100B --shard_size 100000000
-    python scripts/tokenize_fineweb.py --version 350B --max_seq_length 512
+    python scripts/tokenize_fineweb_roberta.py --version 10B --output_dir data/fineweb_edu_10bt
+    python scripts/tokenize_fineweb_roberta.py --version 100B --shard_size 100000000
 
-Shard format:
+Shard format (v3):
     Header (256 int32):
         [0] = 20240520    # magic number
-        [1] = 2           # version (2 for BERT)
+        [1] = 3           # version (3 for RoBERTa-style flat stream)
         [2] = token_count # number of uint16 tokens
-        [3] = vocab_size  # 30522 for bert-base-uncased
+        [3] = vocab_size  # 50265 for roberta-base
         [4] = pad_id      # 0
         [5] = cls_id      # 101
         [6] = sep_id      # 102
         [7] = mask_id     # 103
 
     Tokens (uint16[]):
-        [CLS] tok tok tok ... [SEP] [CLS] tok tok ... [SEP] ...
-
-    The uint16 format can represent values from 0 to 65,535 (2^16 - 1), which is sufficient
-    for BERT token IDs (vocab size 30,522) and allows for future extensions if needed.
+        tok tok tok ... [SEP] tok tok tok ... [SEP] ...
 """
 
 from __future__ import annotations
@@ -47,15 +61,15 @@ from pathlib import Path
 import numpy as np
 from datasets import load_dataset
 from tqdm import tqdm
-from transformers import BertTokenizer
+from transformers import RobertaTokenizerFast
 
-# Suppress tokenizer warnings about sequence length (we handle chunking ourselves)
+# Suppress tokenizer warnings about sequence length
 logging.getLogger("transformers.tokenization_utils_base").setLevel(logging.ERROR)
 
 # Shard format constants
 HEADER_SIZE = 256
 MAGIC_NUMBER = 20240520
-BERT_VERSION = 2
+ROBERTA_VERSION = 3
 
 # Version to HuggingFace dataset mapping
 VERSION_MAP = {
@@ -65,46 +79,48 @@ VERSION_MAP = {
 }
 
 # Global tokenizer (initialized in worker processes)
-_tokenizer: BertTokenizer | None = None
+_tokenizer: RobertaTokenizerFast | None = None
 
 
 def init_worker(tokenizer_name: str) -> None:
     """Initialize tokenizer in worker process."""
     global _tokenizer
-    _tokenizer = BertTokenizer.from_pretrained(tokenizer_name)
+    _tokenizer = RobertaTokenizerFast.from_pretrained(tokenizer_name)
 
 
 def tokenize_document(doc: dict) -> np.ndarray:
     """
-    Tokenize a single document with [CLS] and [SEP] tokens.
+    Tokenize a single document without [CLS], appending [SEP] as boundary.
 
     Args:
         doc: Document dict with "text" field
 
     Returns:
-        numpy array of uint16 token IDs
+        numpy array of uint16 token IDs: [tok, tok, ..., SEP]
     """
     global _tokenizer
     assert _tokenizer is not None, "Tokenizer not initialized"
 
-    # Tokenize with special tokens: [CLS] text [SEP]
+    # Tokenize WITHOUT special tokens
     tokens = _tokenizer.encode(
         doc["text"],
-        add_special_tokens=True,
-        truncation=False,  # Don't truncate, we'll chunk later
+        add_special_tokens=False,
+        truncation=False,
     )
 
-    tokens_np = np.array(tokens, dtype=np.uint16)
-    return tokens_np
+    # Append [SEP] as document boundary marker
+    tokens.append(_tokenizer.sep_token_id)
+
+    return np.array(tokens, dtype=np.uint16)
 
 
 def write_shard(
     filename: Path,
     tokens: np.ndarray,
-    tokenizer: BertTokenizer,
+    tokenizer: RobertaTokenizerFast,
 ) -> None:
     """
-    Write tokens to a binary shard file.
+    Write tokens to a binary shard file (v3 format).
 
     Args:
         filename: Output file path
@@ -113,10 +129,9 @@ def write_shard(
     """
     assert len(tokens) < 2**31, f"Token count {len(tokens)} too large for header"
 
-    # Construct header
     header = np.zeros(HEADER_SIZE, dtype=np.int32)
     header[0] = MAGIC_NUMBER
-    header[1] = BERT_VERSION
+    header[1] = ROBERTA_VERSION
     header[2] = len(tokens)
     header[3] = tokenizer.vocab_size
     header[4] = tokenizer.pad_token_id
@@ -124,7 +139,6 @@ def write_shard(
     header[6] = tokenizer.sep_token_id
     header[7] = tokenizer.mask_token_id
 
-    # Validate tokens fit in uint16
     if not isinstance(tokens, np.ndarray) or tokens.dtype != np.uint16:
         assert (tokens >= 0).all() and (tokens < 2**16).all(), (
             "Tokens must fit in uint16"
@@ -140,7 +154,7 @@ def write_shard(
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Pre-tokenize FineWeb-Edu dataset with BERT tokenizer"
+        description="Pre-tokenize FineWeb-Edu dataset (RoBERTa-style flat stream)"
     )
     parser.add_argument(
         "-v",
@@ -168,8 +182,8 @@ def main() -> None:
         "-t",
         "--tokenizer",
         type=str,
-        default="bert-base-uncased",
-        help="BERT tokenizer name or path",
+        default="roberta-base",
+        help="RoBERTa tokenizer name or path",
     )
     parser.add_argument(
         "-w",
@@ -184,9 +198,14 @@ def main() -> None:
         default=None,
         help="Maximum number of documents to process (for testing)",
     )
+    parser.add_argument(
+        "--val_shards",
+        type=int,
+        default=0,
+        help="Number of leading shards to designate as validation (0 for none)",
+    )
     args = parser.parse_args()
 
-    # Resolve version and output directory
     if args.version not in VERSION_MAP:
         raise ValueError(f"Unknown version: {args.version}")
 
@@ -196,21 +215,20 @@ def main() -> None:
     )
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    print("FineWeb-Edu Pre-tokenization")
+    print("FineWeb-Edu Pre-tokenization (RoBERTa-style)")
     print(f"  Version: {args.version} ({remote_name})")
     print(f"  Output: {output_dir}")
     print(f"  Shard size: {args.shard_size:,} tokens")
     print(f"  Tokenizer: {args.tokenizer}")
+    print("  Format: v3 (flat stream with [SEP] separators)")
 
-    # Load tokenizer for header info
-    tokenizer = BertTokenizer.from_pretrained(args.tokenizer)
+    tokenizer = RobertaTokenizerFast.from_pretrained(args.tokenizer)
     print(f"  Vocab size: {tokenizer.vocab_size}")
     print(
         f"  Special tokens: CLS={tokenizer.cls_token_id}, SEP={tokenizer.sep_token_id}, "
         f"PAD={tokenizer.pad_token_id}, MASK={tokenizer.mask_token_id}"
     )
 
-    # Load dataset (streaming for memory efficiency)
     print("\nLoading dataset from HuggingFace...")
     dataset = load_dataset(
         "HuggingFaceFW/fineweb-edu",
@@ -219,38 +237,31 @@ def main() -> None:
         streaming=True,
     )
 
-    # Limit documents if requested (for testing)
     if args.max_docs:
         dataset = dataset.take(args.max_docs)
 
-    # Setup multiprocessing
     num_workers = args.num_workers or max(1, os.cpu_count() - 2)
     print(f"  Workers: {num_workers}")
 
-    # Process documents
     shard_index = 0
     token_buffer = np.empty((args.shard_size,), dtype=np.uint16)
     token_count = 0
     progress_bar = None
 
-    # Use spawn method to avoid fork issues with transformers
     ctx = mp.get_context("spawn")
     pool = ctx.Pool(num_workers, initializer=init_worker, initargs=(args.tokenizer,))
 
     try:
         for tokens in pool.imap(tokenize_document, dataset, chunksize=16):
-            # Check if we need to write a shard
             while token_count + len(tokens) >= args.shard_size:
-                # Fill current shard
                 remainder = args.shard_size - token_count
-                token_buffer[token_count : token_count + remainder] = tokens[:remainder]
+                start, end = token_count, token_count + remainder
+                token_buffer[start:end] = tokens[:remainder]
 
-                # Write shard (first shard is validation)
-                split = "val" if shard_index == 0 else "train"
+                split = "val" if shard_index < args.val_shards else "train"
                 filename = output_dir / f"fineweb_{split}_{shard_index:06d}.bin"
                 write_shard(filename, token_buffer, tokenizer)
 
-                # Start new shard with remaining tokens
                 tokens = tokens[remainder:]
                 shard_index += 1
                 token_count = 0
@@ -263,9 +274,9 @@ def main() -> None:
                     desc=f"Shard {shard_index}",
                 )
 
-            # Append tokens to buffer
             if len(tokens) > 0:
-                token_buffer[token_count : token_count + len(tokens)] = tokens
+                start, end = token_count, token_count + len(tokens)
+                token_buffer[start:end] = tokens
                 token_count += len(tokens)
 
                 if progress_bar is None:
@@ -277,13 +288,11 @@ def main() -> None:
                 progress_bar.update(len(tokens))
 
     finally:
-        # Proper cleanup to avoid GIL errors
         pool.close()
         pool.join()
 
-    # Write final shard if there are remaining tokens
     if token_count > 0:
-        split = "val" if shard_index == 0 else "train"
+        split = "val" if shard_index < args.val_shards else "train"
         filename = output_dir / f"fineweb_{split}_{shard_index:06d}.bin"
         write_shard(filename, token_buffer[:token_count], tokenizer)
 

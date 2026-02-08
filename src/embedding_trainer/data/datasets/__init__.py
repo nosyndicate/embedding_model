@@ -1,11 +1,17 @@
 """Dataset implementations."""
 
+from embedding_trainer.data.datasets.flat_tokens import (
+    FlatTokenConfig,
+    FlatTokenDataset,
+)
 from embedding_trainer.data.datasets.pretokenized import (
-    PreTokenizedDataset,
     PreTokenizedConfig,
+    PreTokenizedDataset,
 )
 
 __all__ = [
-    "PreTokenizedDataset",
+    "FlatTokenConfig",
+    "FlatTokenDataset",
     "PreTokenizedConfig",
+    "PreTokenizedDataset",
 ]
