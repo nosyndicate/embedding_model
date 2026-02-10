@@ -38,31 +38,84 @@ class EmbeddingLayer(nn.Module):
     ) -> None:
         super().__init__()
         self.embedding = nn.Embedding(vocab_size, embedding_dim)
+        # TODO: maybe try RMSNorm instead of LayerNorm
         self.norm = nn.LayerNorm(embedding_dim) if normalize else nn.Identity()
         self.dropout = nn.Dropout(dropout)
 
     def forward(self, input_ids: Tensor) -> Tensor:
-        hidden_states = self.embedding(input_ids)
+        hidden_states: Tensor = self.embedding(input_ids)
         hidden_states = self.norm(hidden_states)
         hidden_states = self.dropout(hidden_states)
         return hidden_states
 
 
-class EmbeddingModel(BaseEmbeddingModel):
-    def __init__(self, vocab_size: int, hidden_size: int) -> None:
-        super().__init__()
+class TransformerLayer(nn.Module):
+    """"""
 
-        # we need embedding layer
+    def __init__(self, hidden_size: int, num_heads: int, dropout: float = 0.1) -> None:
+        super().__init__()
+        self.attention = nn.MultiheadAttention(
+            embed_dim=hidden_size,
+            num_heads=num_heads,
+            batch_first=True,
+            dropout=dropout,
+        )
+        self.norm1 = nn.LayerNorm(hidden_size)
+        self.mlp = nn.Sequential(
+            nn.Linear(hidden_size, 4 * hidden_size),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(4 * hidden_size, hidden_size),
+        )
+        self.norm2 = nn.LayerNorm(hidden_size)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(
+        self, hidden_states: Tensor, attention_mask: Tensor | None = None
+    ) -> Tensor:
+        """
+        Forward pass through a single transformer layer using pre-layer normalization.
+
+        Args:
+            hidden_states: Tensor of shape (batch_size, seq_length, hidden_size)
+            attention_mask: Tensor of shape (batch_size, seq_length) or None
+
+        Returns:
+            Tensor of shape (batch_size, seq_length, hidden_size)
+        """
+        x = self.norm1(hidden_states)
+        attn_output = self.attention(x, x, x, need_weights=False)
+        hidden_states = hidden_states + self.dropout(attn_output)
+
+        hidden_states = hidden_states + self.dropout(
+            self.mlp(self.norm2(hidden_states))
+        )
+        return hidden_states
+
+
+class EmbeddingModel(BaseEmbeddingModel):
+    def __init__(
+        self, vocab_size: int, hidden_size: int, num_layers: int, num_heads: int
+    ) -> None:
+        super().__init__()
+        self._hidden_size = hidden_size
         self.embedding = EmbeddingLayer(
             vocab_size=vocab_size, embedding_dim=hidden_size
         )
-        # we need several transformer layers
+        self.transformer_layers = nn.ModuleList(
+            [TransformerLayer(hidden_size, num_heads) for _ in range(num_layers)]
+        )
         # we need head
 
     def forward(
         self, input_ids: Tensor, attention_mask: Tensor | None = None
     ) -> ModelOutput:
         hidden_states = self.embedding(input_ids)
-        # TODO: pass through transformer layers
+        for layer in self.transformer_layers:
+            hidden_states = layer(hidden_states, attention_mask=attention_mask)
         # TODO: apply head
         return ModelOutput(last_hidden_state=hidden_states)
+
+    @property
+    def hidden_size(self) -> int:
+        return self._hidden_size
