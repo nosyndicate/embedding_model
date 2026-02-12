@@ -1,7 +1,11 @@
+import math
+
+import torch
 from torch import Tensor, nn
 
 from embedding_trainer.core.base_model import BaseEmbeddingModel
 from embedding_trainer.core.types import ModelOutput
+from embedding_trainer.model.registry import MODEL_REGISTRY
 
 
 class EmbeddingLayer(nn.Module):
@@ -49,16 +53,168 @@ class EmbeddingLayer(nn.Module):
         return hidden_states
 
 
+def precompute_rope_cache(
+    dim: int,
+    max_seq_len: int,
+    base: int = 10000,
+    device: str = "cpu",
+    dtype: torch.dtype = torch.float32,
+) -> tuple[Tensor, Tensor]:
+    """Precompute the frequencies for RoPE:
+    Pairing is: (x[i], x[i + dim//2]) for i in [0, dim//2).
+
+    m * theta_0, m * theta_1, ..., m * theta_{dim//2 - 1}
+
+    frequences = 1 / (base ** (i / dim)) for i in [0, 2, 4, ..., dim-2]
+    Args:
+        dim: The dimension of the model (hidden size).
+        max_seq_len: The maximum sequence length to precompute for.
+        base: The base for computing the frequencies (default: 10000).
+            Higher base means slower decay of frequencies, which can be beneficial for longer sequences.
+        device: The device to store the precomputed frequencies on (e.g., 'cpu' or 'cuda').
+        dtype: The data type for the precomputed frequencies (default: torch.float32 to avoid
+            precision issue with sine/cosine computation).
+
+    Returns:
+        A tuple of tensors (cos, sin) each of shape (max_seq_len, dim // 2) containing the precomputed frequencies.
+    """
+    assert dim % 2 == 0, "Dimension must be even for RoPE."
+
+    # Compute theta for each dimension
+    theta = 1.0 / (
+        base ** (torch.arange(0, dim, 2, device=device, dtype=dtype) / dim)
+    )  # shape: (dim // 2,)
+
+    # Create the position indices for all positions
+    seq_index = torch.arange(
+        max_seq_len, device=device, dtype=dtype
+    )  # shape: (max_seq_len,)
+
+    # Compute the rotation angle, m * theta, for all positions and dimensions
+    index_theta = torch.outer(seq_index, theta)  # shape: (max_seq_len, dim // 2)
+
+    # Compute the cosine and sine of the rotation angles
+    cos = index_theta.cos()  # shape: (max_seq_len, dim // 2)
+    sin = index_theta.sin()  # shape: (max_seq_len, dim // 2)
+    return cos, sin
+
+
+def apply_rope(x: Tensor, cos: Tensor, sin: Tensor) -> Tensor:
+    """Apply RoPE to the input tensor.
+
+    Using pairing  (x[i], x[i + dim//2]) for i in [0, dim//2), the RoPE transformation is:
+    The rotation matrix is
+        [[cos, -sin],
+         [sin,  cos]]
+
+    So we compute:
+        x1_rotated = x1 * cos - x2 * sin
+        x2_rotated = x2 * cos + x1 * sin
+
+    Args:
+        x: Input tensor of shape (..., dim)
+        cos: Precomputed cosine frequencies of shape (max_seq_len, dim // 2)
+        sin: Precomputed sine frequencies of shape (max_seq_len, dim // 2)
+
+    Returns:
+        Tensor of shape (..., dim) with RoPE applied.
+    """
+    x1, x2 = x.chunk(2, dim=-1)  # shape: (..., dim//2), (..., dim//2)
+    x1_rotated = x1 * cos - x2 * sin  # shape: (..., dim//2)
+    x2_rotated = x2 * cos + x1 * sin  # shape: (..., dim//2)
+    return torch.cat([x1_rotated, x2_rotated], dim=-1)  # shape: (..., dim)
+
+
+class SelfAttention(nn.Module):
+    def __init__(
+        self,
+        hidden_size: int,
+        num_heads: int,
+        dropout: float = 0.1,
+        max_seq_len: int = 512,
+        device: str = "cpu",
+        dtype: torch.dtype = torch.float32,
+    ) -> None:
+        super().__init__()
+
+        self.project = nn.Linear(hidden_size, hidden_size * 3)
+        self.out_proj = nn.Linear(hidden_size, hidden_size)
+        self.num_heads = num_heads
+        assert hidden_size % num_heads == 0, (
+            "hidden_size must be divisible by num_heads"
+        )
+        self.d_k = hidden_size // num_heads
+        self.sqrt_d_k = math.sqrt(self.d_k)
+        self.dropout = nn.Dropout(dropout)
+        cos, sin = precompute_rope_cache(
+            dim=hidden_size, max_seq_len=max_seq_len, device=device, dtype=dtype
+        )
+        self.register_buffer("cos_cache", cos, persistent=True)
+        self.register_buffer("sin_cache", sin, persistent=True)
+
+    def forward(
+        self, hidden_states: Tensor, attention_mask: Tensor | None = None
+    ) -> Tensor:
+        """Compute self-attention with RoPE.
+
+        Args:
+            hidden_states: Tensor of shape (batch_size, seq_length, hidden_size)
+            attention_mask: Tensor of shape (batch_size, seq_length) or None
+                1 for position to keep, 0 for position to mask
+
+        Returns:
+            Tensor of shape (batch_size, seq_length, hidden_size) after self-attention.
+        """
+
+        B, T, _ = hidden_states.size()
+        qkv = self.project(hidden_states)  # shape: (B, T, hidden_size * 3)
+        q, k, v = qkv.chunk(3, dim=-1)  # each shape: (B, T, hidden_size)
+
+        # Reshape and transpose for multi-head attention
+        q = q.contiguous().view(B, T, self.num_heads, self.d_k).transpose(1, 2)
+        k = k.contiguous().view(B, T, self.num_heads, self.d_k).transpose(1, 2)
+        v = v.contiguous().view(B, T, self.num_heads, self.d_k).transpose(1, 2)
+
+        q_rope = apply_rope(q, self.cos_cache[:T], self.sin_cache[:T])
+        k_rope = apply_rope(k, self.cos_cache[:T], self.sin_cache[:T])
+
+        attn_weights = torch.matmul(q_rope, k_rope.transpose(-2, -1)) / self.sqrt_d_k
+
+        if attention_mask is not None:
+            key_padding = (attention_mask == 0)[:, None, None, :]
+            attn_weights = attn_weights.masked_fill(key_padding, float("-"))
+
+        attn_weights = torch.softmax(attn_weights, dim=-1)  # shape:(B, N_H, T, T)
+
+        attn_output = torch.matmul(attn_weights, v)  # shape: (B, N_H, T, d_k)
+        attn_output = (
+            attn_output.transpose(1, 2).contiguous().view(B, T, -1)
+        )  # shape: (B, T, hidden_size)
+        attn_output = self.out_proj(attn_output)  # shape: (B, T, hidden_size)
+        attn_output = self.dropout(attn_output)
+        return attn_output
+
+
 class TransformerLayer(nn.Module):
     """"""
 
-    def __init__(self, hidden_size: int, num_heads: int, dropout: float = 0.1) -> None:
+    def __init__(
+        self,
+        hidden_size: int,
+        num_heads: int,
+        dropout: float = 0.1,
+        max_seq_len: int = 512,
+        device: str = "cpu",
+        dtype: torch.dtype = torch.float32,
+    ) -> None:
         super().__init__()
-        self.attention = nn.MultiheadAttention(
-            embed_dim=hidden_size,
-            num_heads=num_heads,
-            batch_first=True,
+        self.attention = SelfAttention(
+            hidden_size,
+            num_heads,
             dropout=dropout,
+            max_seq_len=max_seq_len,
+            device=device,
+            dtype=dtype,
         )
         self.norm1 = nn.LayerNorm(hidden_size)
         self.mlp = nn.Sequential(
@@ -84,7 +240,7 @@ class TransformerLayer(nn.Module):
             Tensor of shape (batch_size, seq_length, hidden_size)
         """
         x = self.norm1(hidden_states)
-        attn_output = self.attention(x, x, x, need_weights=False)
+        attn_output = self.attention(x, attention_mask=attention_mask)
         hidden_states = hidden_states + self.dropout(attn_output)
 
         hidden_states = hidden_states + self.dropout(
@@ -93,6 +249,7 @@ class TransformerLayer(nn.Module):
         return hidden_states
 
 
+@MODEL_REGISTRY.register("base_embedding_model")
 class EmbeddingModel(BaseEmbeddingModel):
     def __init__(
         self, vocab_size: int, hidden_size: int, num_layers: int, num_heads: int
@@ -105,7 +262,7 @@ class EmbeddingModel(BaseEmbeddingModel):
         self.transformer_layers = nn.ModuleList(
             [TransformerLayer(hidden_size, num_heads) for _ in range(num_layers)]
         )
-        # we need head
+        self.head = nn.Linear(hidden_size, vocab_size)
 
     def forward(
         self, input_ids: Tensor, attention_mask: Tensor | None = None
@@ -113,8 +270,21 @@ class EmbeddingModel(BaseEmbeddingModel):
         hidden_states = self.embedding(input_ids)
         for layer in self.transformer_layers:
             hidden_states = layer(hidden_states, attention_mask=attention_mask)
-        # TODO: apply head
-        return ModelOutput(last_hidden_state=hidden_states)
+
+        logits = self.head(hidden_states)
+        return ModelOutput(hidden_states=hidden_states, logits=logits)
+
+    def get_embeddings(
+        self, input_ids: Tensor, attention_mask: Tensor | None = None
+    ) -> Tensor:
+        hidden_states = self.embedding(input_ids)
+        for layer in self.transformer_layers:
+            hidden_states = layer(hidden_states, attention_mask=attention_mask)
+
+        embeddings: Tensor = hidden_states.mean(
+            dim=1
+        )  # shape: (batch_size, hidden_size)
+        return embeddings
 
     @property
     def hidden_size(self) -> int:
