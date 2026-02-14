@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol, TypedDict, runtime_checkable
+from typing import Any, Protocol, Required, TypedDict, runtime_checkable
 
 import numpy as np
 import torch
@@ -15,6 +15,8 @@ HEADER_SIZE = 256  # Number of int32 values in header
 MAGIC_NUMBER = 20240520
 BERT_VERSION = 2
 ROBERTA_VERSION = 3
+
+LABEL_IGNORE_ID = -100  # Used to ignore tokens in loss computation
 
 
 @dataclass
@@ -62,9 +64,9 @@ class ShardInfo:
 class PreTokenizedBatch(TypedDict, total=False):
     """Batch of pre-tokenized data."""
 
-    input_ids: torch.Tensor  # (batch_size, seq_length)
-    attention_mask: torch.Tensor  # (batch_size, seq_length)
-    labels: torch.Tensor  # (batch_size, seq_length) for MLM
+    input_ids: Required[torch.Tensor]  # (batch_size, seq_length)
+    attention_mask: Required[torch.Tensor]  # (batch_size, seq_length)
+    labels: Required[torch.Tensor]  # (batch_size, seq_length) for MLM
 
 
 @runtime_checkable

@@ -8,7 +8,7 @@ import torch
 from tokenizers import Tokenizer
 from torch import Tensor
 
-from embedding_trainer.data.base import PreTokenizedBatch
+from embedding_trainer.data.base import LABEL_IGNORE_ID, PreTokenizedBatch
 from embedding_trainer.data.collators.base import BaseCollator, BaseCollatorConfig
 from embedding_trainer.data.registry import COLLATOR_REGISTRY
 
@@ -105,7 +105,7 @@ class MLMCollator(BaseCollator):
         masked_indices = torch.bernoulli(probability_matrix).bool()
 
         # Set labels to -100 for non-masked tokens (will be ignored in loss)
-        labels[~masked_indices] = -100
+        labels[~masked_indices] = LABEL_IGNORE_ID
         input_ids[masked_indices] = self.mask_token_id  # Default to [MASK]
 
         return input_ids, labels
