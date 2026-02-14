@@ -61,6 +61,27 @@ class TestTokenizeDocument:
         with pytest.raises(AssertionError, match="Tokenizer not initialized"):
             tokenize_document({"text": "Hello world"})
 
+    def test_empty_text_returns_only_eos(self, tokenizer: RobertaTokenizerFast) -> None:
+        result = tokenize_document({"text": ""})
+        assert len(result) == 1
+        assert result[0] == tokenizer.sep_token_id
+
+    def test_whitespace_only_text(self, tokenizer: RobertaTokenizerFast) -> None:
+        result = tokenize_document({"text": "   \n\t  "})
+        assert result[-1] == tokenizer.sep_token_id
+        assert result.dtype == np.uint16
+
+    def test_very_long_document(self, tokenizer: RobertaTokenizerFast) -> None:
+        long_text = "word " * 10_000
+        result = tokenize_document({"text": long_text})
+        assert result[-1] == tokenizer.sep_token_id
+        assert result.dtype == np.uint16
+        assert len(result) > 1
+
+    def test_all_token_ids_within_vocab(self, tokenizer: RobertaTokenizerFast) -> None:
+        result = tokenize_document({"text": "Hello world"})
+        assert (result < tokenizer.vocab_size).all()
+
 
 class TestWriteShard:
     """Tests for write_shard()."""
@@ -120,9 +141,11 @@ class TestMainPipeline:
     """End-to-end tests for main() with mocked dataset and multiprocessing."""
 
     @pytest.fixture(autouse=True)
-    def _cleanup_tokenizer(self) -> Generator[None, None, None]:
+    def _cleanup_tokenizer(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> Generator[None, None, None]:
         yield
-        script_mod._tokenizer = None
+        monkeypatch.setattr(script_mod, "_tokenizer", None)
 
     SAMPLE_DOCS = [
         {"text": "The quick brown fox jumps over the lazy dog."},
@@ -162,6 +185,7 @@ class TestMainPipeline:
         tmp_path: Path,
         extra_args: list[str] | None = None,
         docs: list[dict[str, str]] | None = None,
+        shard_size: str = "50",
     ) -> Path:
         """Helper to run main() with mocked dependencies."""
         if docs is None:
@@ -175,7 +199,7 @@ class TestMainPipeline:
             "--output_dir",
             str(output_dir),
             "--shard_size",
-            "50",
+            shard_size,
             "--tokenizer",
             str(FIXTURE_TOKENIZER),
             "--num_workers",
@@ -255,35 +279,8 @@ class TestMainPipeline:
     def test_tail_shard_written(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        # Use a shard_size that won't evenly divide total tokens
-        output_dir = tmp_path / "output_tail"
-        argv = [
-            "tokenize_fineweb_roberta.py",
-            "--version",
-            "10B",
-            "--output_dir",
-            str(output_dir),
-            "--shard_size",
-            "200",
-            "--tokenizer",
-            str(FIXTURE_TOKENIZER),
-            "--num_workers",
-            "1",
-        ]
-        monkeypatch.setattr(sys, "argv", argv)
-
-        mock_ctx = self._make_mock_pool()
-
-        with (
-            patch.object(script_mod, "load_dataset", return_value=self.SAMPLE_DOCS),
-            patch.object(script_mod.mp, "get_context", return_value=mock_ctx),
-        ):
-            main()
-
+        output_dir = self._run_main(monkeypatch, tmp_path, shard_size="200")
         shards = sorted(output_dir.glob("*.bin"))
         assert len(shards) >= 2
-
-        # The last shard should have fewer tokens than shard_size
         last_header = np.fromfile(str(shards[-1]), dtype=np.int32, count=HEADER_SIZE)
-        last_token_count = last_header[2]
-        assert 0 < last_token_count < 200
+        assert 0 < last_header[2] < 200

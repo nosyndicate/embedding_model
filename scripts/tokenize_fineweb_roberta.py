@@ -61,7 +61,7 @@ from pathlib import Path
 import numpy as np
 from datasets import load_dataset
 from tqdm import tqdm
-from transformers import RobertaTokenizerFast
+from transformers import RobertaTokenizerFast  # type: ignore
 
 # Suppress tokenizer warnings about sequence length
 logging.getLogger("transformers.tokenization_utils_base").setLevel(logging.ERROR)
@@ -240,7 +240,8 @@ def main() -> None:
     if args.max_docs:
         dataset = dataset.take(args.max_docs)
 
-    num_workers = args.num_workers or max(1, os.cpu_count() - 2)
+    cpu_count: int = os.cpu_count() or 1
+    num_workers = args.num_workers or max(1, cpu_count - 2)
     print(f"  Workers: {num_workers}")
 
     shard_index = 0
