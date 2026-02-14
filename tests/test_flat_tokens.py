@@ -155,7 +155,8 @@ class TestIndexing:
 
         for i in range(len(ds)):
             batch = ds[i]
-            expected = tokens[i * 512 : (i + 1) * 512].astype(np.int64)
+            s, e = i * 512, (i + 1) * 512
+            expected = tokens[s:e].astype(np.int64)
             assert torch.equal(batch["input_ids"], torch.from_numpy(expected))
 
     def test_getitem_returns_correct_shape_and_dtype(self, tmp_path: Path) -> None:
@@ -166,7 +167,7 @@ class TestIndexing:
 
         batch = ds[0]
         assert batch["input_ids"].shape == (128,)
-        assert batch["input_ids"].dtype == torch.int64
+        assert batch["input_ids"].dtype == torch.int32
 
     def test_getitem_cross_shard_boundary(self, tmp_path: Path) -> None:
         """Sequences near shard boundaries should map to the correct shard."""
@@ -239,4 +240,4 @@ class TestDataLoaderIntegration:
         batch = next(iter(loader))
 
         assert batch["input_ids"].shape == (4, 128)
-        assert batch["input_ids"].dtype == torch.int64
+        assert batch["input_ids"].dtype == torch.int32

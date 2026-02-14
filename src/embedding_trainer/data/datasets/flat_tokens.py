@@ -5,6 +5,7 @@ from __future__ import annotations
 import bisect
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 import torch
@@ -28,9 +29,24 @@ class FlatTokenConfig:
     max_seq_length: int = 512
     split: str = "train"
 
+    # Sequence sampling strategy
+    # - "fixed": Always start windows at offset 0 (default, deterministic)
+    # - "epoch_offset": Rotate starting offset each epoch for data variety
+    sampling_strategy: Literal["fixed", "epoch_offset"] = "fixed"
+    num_offset_phases: int = 4  # Number of distinct offsets to cycle through
+
     def __post_init__(self) -> None:
         if self.max_seq_length < 1:
             raise ValueError(f"max_seq_length must be >= 1, got {self.max_seq_length}")
+        if self.sampling_strategy not in ("fixed", "epoch_offset"):
+            raise ValueError(
+                f"Invalid sampling_strategy: {self.sampling_strategy!r}. "
+                "Must be 'fixed' or 'epoch_offset'."
+            )
+        if self.num_offset_phases < 1:
+            raise ValueError(
+                f"num_offset_phases must be >= 1, got {self.num_offset_phases}"
+            )
 
 
 @DATASET_REGISTRY.register("flat_tokens")
@@ -44,9 +60,9 @@ class FlatTokenDataset(Dataset):
     separated by </s> tokens but are otherwise concatenated end-to-end.
 
     The dataset treats all shards as one logical token stream and divides it into
-    ``total_tokens // max_seq_length`` sequences. Sequences may span document
-    boundaries (RoBERTa FULL-SENTENCES approach). Remainder tokens at the end of
-    each shard that don't fill a complete window are silently dropped.
+    ``total_tokens // max_seq_length`` sequences. Sequences may span both document
+    and shard boundaries (RoBERTa FULL-SENTENCES approach). Only the remainder
+    tokens at the very end of the global stream are dropped.
 
     Shard data is accessed via memory-mapped arrays (numpy memmap), created lazily
     per-worker so that forked DataLoader workers each get their own file handles.
@@ -60,8 +76,10 @@ class FlatTokenDataset(Dataset):
 
         self._shards: list[ShardInfo] = []
         self._header: ShardHeader | None = None
-        self._cumulative_seqs: list[int] = []
+        self._cumulative_tokens: list[int] = []
         self._total_seqs: int = 0
+        self._epoch: int = 0
+        self._offset: int = 0
 
         # Lazy mmap cache (populated per-worker after fork)
         self._mmap_cache: dict[int, np.ndarray] = {}
@@ -86,6 +104,22 @@ class FlatTokenDataset(Dataset):
             header = self._read_header(path)
             if self._header is None:
                 self._header = header
+            else:
+                # Validate format fields match (token_count may differ across shards)
+                for field in (
+                    "magic",
+                    "version",
+                    "vocab_size",
+                    "pad_id",
+                    "cls_id",
+                    "sep_id",
+                    "mask_id",
+                ):
+                    if getattr(header, field) != getattr(self._header, field):
+                        raise ValueError(
+                            f"Shard {path} has inconsistent {field}: "
+                            f"{getattr(header, field)} != {getattr(self._header, field)}"
+                        )
             self._shards.append(
                 ShardInfo(
                     path=path,
@@ -110,35 +144,39 @@ class FlatTokenDataset(Dataset):
         return parsed
 
     def _build_index(self) -> None:
-        """Build cumulative sequence counts for global-to-local index mapping.
+        """Build cumulative token counts for global-to-local index mapping.
 
-        Figure out how many sequences each shard contributes and store the
-        cumulative counts as a monotonic increase list. This list will be used
-        for fast global-to-local index mapping by using binary search.
+        Stores cumulative token counts across shards so that a global token
+        position can be mapped to a (shard, local_offset) pair via binary
+        search.  Sequences are indexed over the global token stream, so a
+        sequence may span a shard boundary.
 
-        Example:
-            first shard contributes 100 sequences
-            second shard contributes 150 sequences
-            third shard contributes 150 sequences
+        When ``sampling_strategy="epoch_offset"``, a per-epoch token offset is
+        applied so that window boundaries shift each epoch:
 
-            then:
-                cumulative_seqs = [0, 100, 250, 400]
+            offset = (phase * max_seq_length) // num_offset_phases
 
-            if:
-                idx = 120
-                shard_idx = 1
-                local_idx = 20
-
-        Also, compute the total number of sequences across all shards. This is
-        the number of samples the dataset will provide.
+        where ``phase = epoch % num_offset_phases``. The sequence count is
+        recomputed on every :meth:`set_epoch` call.
         """
+        if self.config.sampling_strategy == "epoch_offset":
+            phase = self._epoch % self.config.num_offset_phases
+            self._offset = (
+                phase * self.max_seq_length
+            ) // self.config.num_offset_phases
+        else:
+            self._offset = 0
+
         cumulative = 0
-        self._cumulative_seqs = [0]
+        self._cumulative_tokens = [0]
         for shard in self._shards:
-            num_seqs = shard.token_count // self.max_seq_length
-            cumulative += num_seqs
-            self._cumulative_seqs.append(cumulative)
-        self._total_seqs = cumulative
+            cumulative += shard.token_count
+            self._cumulative_tokens.append(cumulative)
+
+        total_tokens = cumulative - self._offset
+        self._total_seqs = (
+            total_tokens // self.max_seq_length if total_tokens > 0 else 0
+        )
 
     def _get_mmap(self, shard_idx: int) -> np.ndarray:
         """Get or create memory-mapped array for a shard."""
@@ -160,19 +198,46 @@ class FlatTokenDataset(Dataset):
         if idx < 0 or idx >= self._total_seqs:
             raise IndexError(f"Index {idx} out of range [0, {self._total_seqs})")
 
-        # Binary search for which shard contains this index
-        shard_idx = bisect.bisect_right(self._cumulative_seqs, idx) - 1
-        local_idx = idx - self._cumulative_seqs[shard_idx]
+        global_start = self._offset + idx * self.max_seq_length
 
-        tokens = self._get_mmap(shard_idx)
+        # Binary search cumulative_tokens to find starting shard
+        shard_idx = bisect.bisect_right(self._cumulative_tokens, global_start) - 1
+        local_start = global_start - self._cumulative_tokens[shard_idx]
 
-        start = local_idx * self.max_seq_length
-        end = start + self.max_seq_length
-        seq_tokens = tokens[start:end].copy()
+        tokens_in_curr_shard = self._get_mmap(shard_idx)
+        remaining_in_shard = len(tokens_in_curr_shard) - local_start
+
+        if remaining_in_shard >= self.max_seq_length:
+            # Common case: entire sequence within one shard
+            s, e = local_start, local_start + self.max_seq_length
+            seq_tokens = tokens_in_curr_shard[s:e].copy()
+        else:
+            # Rare case: sequence spans shard boundary
+            parts = [tokens_in_curr_shard[local_start:].copy()]
+            needed = self.max_seq_length - remaining_in_shard
+            next_shard = shard_idx + 1
+            while needed > 0:
+                tokens_in_next_shard = self._get_mmap(next_shard)
+                take = min(needed, len(tokens_in_next_shard))
+                parts.append(tokens_in_next_shard[:take].copy())
+                needed -= take
+                next_shard += 1
+            seq_tokens = np.concatenate(parts)
 
         return {
-            "input_ids": torch.from_numpy(seq_tokens.astype(np.int64)),
+            # Convert to int32 tensor for PyTorch (torch.uint16 has limited support)
+            "input_ids": torch.from_numpy(seq_tokens.astype(np.int32)),
         }
+
+    def set_epoch(self, epoch: int) -> None:
+        """Set the current epoch, rebuilding the sequence index if needed.
+
+        When ``sampling_strategy="epoch_offset"``, each epoch uses a different
+        token offset so window boundaries shift and the model sees varied
+        sequence groupings across epochs.
+        """
+        self._epoch = epoch
+        self._build_index()
 
     @property
     def header(self) -> ShardHeader | None:
