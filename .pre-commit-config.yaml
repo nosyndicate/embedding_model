@@ -30,7 +30,7 @@ repos:
       # Fast test subset on commit
       - id: pytest-fast
         name: pytest fast checks
-        entry: python -m pytest tests/test_data_pipeline.py::TestRegistry -v --override-ini="addopts="
+        entry: python -m pytest tests/test_data_pipeline.py::TestRegistry tests/data/collators/test_mlm.py tests/data/datasets/test_flat_tokens.py -v --override-ini="addopts="
         language: system
         pass_filenames: false
         types: [python]
