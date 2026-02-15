@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, Required, TypedDict, runtime_checkable
@@ -71,14 +70,14 @@ class PreTokenizedBatch(TypedDict, total=False):
 
 @runtime_checkable
 class DatasetProtocol(Protocol):
-    """Protocol for datasets."""
+    """Protocol for map-style datasets."""
 
-    def __iter__(self) -> Iterator[dict[str, Any]]:
-        """Iterate over dataset samples."""
+    def __len__(self) -> int:
+        """Return number of samples."""
         ...
 
-    def set_epoch(self, epoch: int) -> None:
-        """Set the epoch for reproducible shuffling."""
+    def __getitem__(self, idx: int) -> dict[str, Any]:
+        """Get one sample."""
         ...
 
 

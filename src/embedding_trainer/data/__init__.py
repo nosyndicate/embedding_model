@@ -11,7 +11,11 @@ from embedding_trainer.data.datasets.flat_tokens import (
     FlatTokenConfig,
     FlatTokenDataset,
 )
-from embedding_trainer.data.loader import DataLoaderConfig, create_dataloader
+from embedding_trainer.data.loader import (
+    DataLoaderConfig,
+    create_dataloader,
+    create_distributed_dataloader,
+)
 from embedding_trainer.data.registry import COLLATOR_REGISTRY, DATASET_REGISTRY
 
 __all__ = [
@@ -26,4 +30,5 @@ __all__ = [
     "ShardHeader",
     "ShardInfo",
     "create_dataloader",
+    "create_distributed_dataloader",
 ]

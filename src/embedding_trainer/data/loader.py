@@ -7,7 +7,8 @@ from dataclasses import dataclass
 from typing import Any
 
 import torch
-from torch.utils.data import DataLoader, Dataset, IterableDataset
+from torch.utils.data import DataLoader, Dataset
+from torch.utils.data.distributed import DistributedSampler
 
 from embedding_trainer.data.base import CollatorProtocol, DatasetProtocol
 
@@ -21,10 +22,41 @@ class DataLoaderConfig:
     prefetch_factor: int = 2
     pin_memory: bool = True
     drop_last: bool = True
+    shuffle: bool = True
+
+    def __post_init__(self) -> None:
+        if self.batch_size < 1:
+            raise ValueError(f"batch_size must be >= 1, got {self.batch_size}")
+        if self.num_workers < 0:
+            raise ValueError(f"num_workers must be >= 0, got {self.num_workers}")
+        if self.num_workers > 0 and self.prefetch_factor < 1:
+            raise ValueError(
+                "prefetch_factor must be >= 1 when num_workers > 0, "
+                f"got {self.prefetch_factor}"
+            )
+
+
+def _build_loader_kwargs(
+    config: DataLoaderConfig,
+    collator: CollatorProtocol | Callable[[list[dict[str, Any]]], Any],
+) -> dict[str, Any]:
+    """Build common DataLoader kwargs."""
+    loader_kwargs: dict[str, Any] = {
+        "batch_size": config.batch_size,
+        "collate_fn": collator,
+        "num_workers": config.num_workers,
+        "pin_memory": config.pin_memory and torch.cuda.is_available(),
+        "drop_last": config.drop_last,
+    }
+
+    if config.num_workers > 0:
+        loader_kwargs["prefetch_factor"] = config.prefetch_factor
+
+    return loader_kwargs
 
 
 def create_dataloader(
-    dataset: DatasetProtocol | Dataset,
+    dataset: DatasetProtocol | Dataset[Any],
     collator: CollatorProtocol | Callable[[list[dict[str, Any]]], Any],
     config: DataLoaderConfig | None = None,
 ) -> DataLoader:
@@ -32,7 +64,7 @@ def create_dataloader(
     Create a DataLoader for the given dataset and collator.
 
     Args:
-        dataset: Dataset to load from (IterableDataset or map-style)
+        dataset: Map-style dataset to load from
         collator: Collator function to batch samples
         config: DataLoader configuration
 
@@ -42,41 +74,21 @@ def create_dataloader(
     if config is None:
         config = DataLoaderConfig()
 
-    # Determine if this is an iterable dataset
-    is_iterable = isinstance(dataset, IterableDataset)
-
-    loader_kwargs: dict[str, Any] = {
-        "batch_size": config.batch_size,
-        "collate_fn": collator,
-        "num_workers": config.num_workers,
-        "pin_memory": config.pin_memory and torch.cuda.is_available(),
-        "drop_last": config.drop_last,
-    }
-
-    # prefetch_factor only valid when num_workers > 0
-    if config.num_workers > 0:
-        loader_kwargs["prefetch_factor"] = config.prefetch_factor
-
-    # Iterable datasets don't support shuffle (handled internally)
-    if not is_iterable:
-        loader_kwargs["shuffle"] = True
+    loader_kwargs = _build_loader_kwargs(config, collator)
+    loader_kwargs["shuffle"] = config.shuffle
 
     return DataLoader(dataset, **loader_kwargs)
 
 
 def create_distributed_dataloader(
-    dataset: DatasetProtocol | IterableDataset,
+    dataset: DatasetProtocol | Dataset[Any],
     collator: CollatorProtocol | Callable[[list[dict[str, Any]]], Any],
     config: DataLoaderConfig | None = None,
     rank: int = 0,
     world_size: int = 1,
-) -> DataLoader:
+) -> tuple[DataLoader, DistributedSampler]:
     """
-    Create a DataLoader for distributed training.
-
-    For IterableDatasets like PreTokenizedDataset, distributed sharding
-    is handled internally by the dataset. For map-style datasets,
-    a DistributedSampler is used.
+    Create a DataLoader for distributed training (map-style datasets only).
 
     Args:
         dataset: Dataset to load from
@@ -86,36 +98,21 @@ def create_distributed_dataloader(
         world_size: Total number of processes
 
     Returns:
-        Configured DataLoader for distributed training
+        Tuple of (DataLoader, DistributedSampler).
+        The caller must call sampler.set_epoch(epoch) once per epoch for
+        epoch-dependent shuffling.
     """
     if config is None:
         config = DataLoaderConfig()
 
-    is_iterable = isinstance(dataset, IterableDataset)
+    sampler = DistributedSampler(
+        dataset,
+        num_replicas=world_size,
+        rank=rank,
+        shuffle=config.shuffle,
+        drop_last=config.drop_last,
+    )
+    loader_kwargs = _build_loader_kwargs(config, collator)
+    loader_kwargs["sampler"] = sampler
 
-    loader_kwargs: dict[str, Any] = {
-        "batch_size": config.batch_size,
-        "collate_fn": collator,
-        "num_workers": config.num_workers,
-        "pin_memory": config.pin_memory and torch.cuda.is_available(),
-        "drop_last": config.drop_last,
-    }
-
-    if config.num_workers > 0:
-        loader_kwargs["prefetch_factor"] = config.prefetch_factor
-
-    if not is_iterable:
-        # Use DistributedSampler for map-style datasets
-        from torch.utils.data.distributed import DistributedSampler
-
-        sampler: DistributedSampler = DistributedSampler(
-            dataset,
-            num_replicas=world_size,
-            rank=rank,
-            shuffle=True,
-            drop_last=config.drop_last,
-        )
-        loader_kwargs["sampler"] = sampler
-    # For iterable datasets, distributed sharding is internal
-
-    return DataLoader(dataset, **loader_kwargs)
+    return DataLoader(dataset, **loader_kwargs), sampler
