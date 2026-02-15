@@ -9,8 +9,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from torch import nn
 
-    from embedding_trainer.data.base import CollatorProtocol
-    from embedding_trainer.data.datasets.pretokenized import ShardHeader
+    from embedding_trainer.data.base import CollatorProtocol, ShardHeader
 
 
 @dataclass

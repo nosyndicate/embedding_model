@@ -8,9 +8,8 @@ from typing import Any
 import torch
 from torch import nn
 
-from embedding_trainer.data.base import CollatorProtocol
+from embedding_trainer.data.base import CollatorProtocol, ShardHeader
 from embedding_trainer.data.collators.mlm import MLMCollator, MLMCollatorConfig
-from embedding_trainer.data.datasets.pretokenized import ShardHeader
 from embedding_trainer.eval.base import BaseEvalTask
 from embedding_trainer.eval.registry import EVAL_TASK_REGISTRY
 
