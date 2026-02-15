@@ -61,7 +61,7 @@ from pathlib import Path
 import numpy as np
 from datasets import load_dataset
 from tqdm import tqdm
-from transformers import RobertaTokenizerFast  # type: ignore
+from transformers import AutoTokenizer
 
 # Suppress tokenizer warnings about sequence length
 logging.getLogger("transformers.tokenization_utils_base").setLevel(logging.ERROR)
@@ -79,13 +79,13 @@ VERSION_MAP = {
 }
 
 # Global tokenizer (initialized in worker processes)
-_tokenizer: RobertaTokenizerFast | None = None
+_tokenizer: AutoTokenizer | None = None
 
 
 def init_worker(tokenizer_name: str) -> None:
     """Initialize tokenizer in worker process."""
     global _tokenizer
-    _tokenizer = RobertaTokenizerFast.from_pretrained(tokenizer_name)
+    _tokenizer = AutoTokenizer.from_pretrained(tokenizer_name, use_fast=True)
 
 
 def tokenize_document(doc: dict) -> np.ndarray:
@@ -117,7 +117,7 @@ def tokenize_document(doc: dict) -> np.ndarray:
 def write_shard(
     filename: Path,
     tokens: np.ndarray,
-    tokenizer: RobertaTokenizerFast,
+    tokenizer: AutoTokenizer,
 ) -> None:
     """
     Write tokens to a binary shard file (v3 format).
@@ -222,7 +222,7 @@ def main() -> None:
     print(f"  Tokenizer: {args.tokenizer}")
     print("  Format: v3 (flat stream with [SEP] separators)")
 
-    tokenizer = RobertaTokenizerFast.from_pretrained(args.tokenizer)
+    tokenizer = AutoTokenizer.from_pretrained(args.tokenizer, use_fast=True)
     print(f"  Vocab size: {tokenizer.vocab_size}")
     print(
         f"  Special tokens: CLS={tokenizer.cls_token_id}, SEP={tokenizer.sep_token_id}, "

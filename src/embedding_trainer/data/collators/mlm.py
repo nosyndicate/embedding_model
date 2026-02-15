@@ -23,11 +23,11 @@ class MLMCollatorConfig(BaseCollatorConfig):
     def from_tokenizer(tokenizer: Tokenizer) -> MLMCollatorConfig:
         """Create config from a Hugging Face Tokenizer."""
         return MLMCollatorConfig(
-            pad_token_id=tokenizer.token_to_id(tokenizer.pad_token),
-            cls_token_id=tokenizer.token_to_id(tokenizer.cls_token),
-            sep_token_id=tokenizer.token_to_id(tokenizer.sep_token),
-            mask_token_id=tokenizer.token_to_id(tokenizer.mask_token),
-            vocab_size=tokenizer.get_vocab_size(),
+            pad_token_id=tokenizer.pad_token_id,
+            cls_token_id=tokenizer.cls_token_id,
+            sep_token_id=tokenizer.sep_token_id,
+            mask_token_id=tokenizer.mask_token_id,
+            vocab_size=tokenizer.vocab_size,
         )
 
 

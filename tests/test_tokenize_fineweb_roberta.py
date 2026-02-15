@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
-from transformers import RobertaTokenizerFast  # type: ignore
+from transformers import AutoTokenizer
 
 import scripts.tokenize_fineweb_roberta as script_mod
 from scripts.tokenize_fineweb_roberta import (
@@ -29,8 +29,8 @@ FIXTURE_TOKENIZER = Path(__file__).parent / "fixtures" / "roberta-base"
 
 
 @pytest.fixture
-def tokenizer() -> RobertaTokenizerFast:
-    return RobertaTokenizerFast.from_pretrained(str(FIXTURE_TOKENIZER))
+def tokenizer() -> AutoTokenizer:
+    return AutoTokenizer.from_pretrained(str(FIXTURE_TOKENIZER), use_fast=True)
 
 
 class TestTokenizeDocument:
@@ -38,17 +38,17 @@ class TestTokenizeDocument:
 
     @pytest.fixture(autouse=True)
     def _set_tokenizer(
-        self, tokenizer: RobertaTokenizerFast, monkeypatch: Any
+        self, tokenizer: AutoTokenizer, monkeypatch: Any
     ) -> Generator[None, None, None]:
         monkeypatch.setattr(script_mod, "_tokenizer", tokenizer)
         yield
         monkeypatch.setattr(script_mod, "_tokenizer", None)
 
-    def test_appends_eos(self, tokenizer: RobertaTokenizerFast) -> None:
+    def test_appends_eos(self, tokenizer: AutoTokenizer) -> None:
         result = tokenize_document({"text": "Hello world"})
         assert result[-1] == tokenizer.sep_token_id  # </s> = 2
 
-    def test_no_bos_token(self, tokenizer: RobertaTokenizerFast) -> None:
+    def test_no_bos_token(self, tokenizer: AutoTokenizer) -> None:
         result = tokenize_document({"text": "Hello world"})
         assert result[0] != tokenizer.cls_token_id  # <s> = 0
 
@@ -61,24 +61,24 @@ class TestTokenizeDocument:
         with pytest.raises(AssertionError, match="Tokenizer not initialized"):
             tokenize_document({"text": "Hello world"})
 
-    def test_empty_text_returns_only_eos(self, tokenizer: RobertaTokenizerFast) -> None:
+    def test_empty_text_returns_only_eos(self, tokenizer: AutoTokenizer) -> None:
         result = tokenize_document({"text": ""})
         assert len(result) == 1
         assert result[0] == tokenizer.sep_token_id
 
-    def test_whitespace_only_text(self, tokenizer: RobertaTokenizerFast) -> None:
+    def test_whitespace_only_text(self, tokenizer: AutoTokenizer) -> None:
         result = tokenize_document({"text": "   \n\t  "})
         assert result[-1] == tokenizer.sep_token_id
         assert result.dtype == np.uint16
 
-    def test_very_long_document(self, tokenizer: RobertaTokenizerFast) -> None:
+    def test_very_long_document(self, tokenizer: AutoTokenizer) -> None:
         long_text = "word " * 10_000
         result = tokenize_document({"text": long_text})
         assert result[-1] == tokenizer.sep_token_id
         assert result.dtype == np.uint16
         assert len(result) > 1
 
-    def test_all_token_ids_within_vocab(self, tokenizer: RobertaTokenizerFast) -> None:
+    def test_all_token_ids_within_vocab(self, tokenizer: AutoTokenizer) -> None:
         result = tokenize_document({"text": "Hello world"})
         assert (result < tokenizer.vocab_size).all()
 
@@ -86,9 +86,7 @@ class TestTokenizeDocument:
 class TestWriteShard:
     """Tests for write_shard()."""
 
-    def test_header_fields(
-        self, tmp_path: Path, tokenizer: RobertaTokenizerFast
-    ) -> None:
+    def test_header_fields(self, tmp_path: Path, tokenizer: AutoTokenizer) -> None:
         tokens = np.array([100, 200, 300, 2], dtype=np.uint16)
         path = tmp_path / "test.bin"
         write_shard(path, tokens, tokenizer)
@@ -104,7 +102,7 @@ class TestWriteShard:
         assert header[7] == tokenizer.mask_token_id  # 50264
 
     def test_token_data_roundtrip(
-        self, tmp_path: Path, tokenizer: RobertaTokenizerFast
+        self, tmp_path: Path, tokenizer: AutoTokenizer
     ) -> None:
         tokens = np.array([100, 200, 300, 2], dtype=np.uint16)
         path = tmp_path / "test.bin"
@@ -115,7 +113,7 @@ class TestWriteShard:
             data = np.frombuffer(f.read(), dtype=np.uint16)
         np.testing.assert_array_equal(data, tokens)
 
-    def test_file_size(self, tmp_path: Path, tokenizer: RobertaTokenizerFast) -> None:
+    def test_file_size(self, tmp_path: Path, tokenizer: AutoTokenizer) -> None:
         num_tokens = 1000
         tokens = np.arange(num_tokens, dtype=np.uint16)
         path = tmp_path / "test.bin"
@@ -125,7 +123,7 @@ class TestWriteShard:
         assert path.stat().st_size == expected_size
 
     def test_non_uint16_input_converted(
-        self, tmp_path: Path, tokenizer: RobertaTokenizerFast
+        self, tmp_path: Path, tokenizer: AutoTokenizer
     ) -> None:
         tokens_int32 = np.array([100, 200, 300, 2], dtype=np.int32)
         path = tmp_path / "test.bin"
@@ -154,6 +152,21 @@ class TestMainPipeline:
         {"text": "Natural language processing is a subfield of AI."},
         {"text": "Transformers have revolutionized deep learning."},
     ]
+
+    def test_sample_docs_encode_decode_exact_roundtrip(self) -> None:
+        tokenizer = AutoTokenizer.from_pretrained(str(FIXTURE_TOKENIZER))
+        for i, doc in enumerate(self.SAMPLE_DOCS):
+            text = doc["text"]
+            ids = tokenizer.encode(
+                text,
+                add_special_tokens=False,
+                truncation=False,
+            )
+            decoded = tokenizer.decode(ids, clean_up_tokenization_spaces=False)
+            assert decoded == text, (
+                f"Round-trip mismatch for SAMPLE_DOCS[{i}]: "
+                f"original={text!r} decoded={decoded!r}"
+            )
 
     def _make_mock_pool(self) -> MagicMock:
         """Create a mock multiprocessing context that runs in-process."""
@@ -279,7 +292,7 @@ class TestMainPipeline:
     def test_tail_shard_written(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        output_dir = self._run_main(monkeypatch, tmp_path, shard_size="200")
+        output_dir = self._run_main(monkeypatch, tmp_path, shard_size="20")
         shards = sorted(output_dir.glob("*.bin"))
         assert len(shards) >= 2
         last_header = np.fromfile(str(shards[-1]), dtype=np.int32, count=HEADER_SIZE)
