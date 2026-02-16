@@ -5,9 +5,8 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from typing import Any
 
-from torch import Tensor
-
 from embedding_trainer.core.types import TaskOutput
+from embedding_trainer.data.base import PreTokenizedBatch
 
 
 class BaseTask(ABC):
@@ -18,12 +17,12 @@ class BaseTask(ABC):
     """
 
     @abstractmethod
-    def compute_loss(self, model: Any, batch: dict[str, Tensor]) -> TaskOutput:
+    def compute_loss(self, model: Any, batch: PreTokenizedBatch) -> TaskOutput:
         """Compute loss for a batch.
 
         Args:
             model: The model to compute loss for.
-            batch: Dictionary containing batch tensors (input_ids, attention_mask, etc.)
+            batch: PreTokenizedBatch containing input_ids, attention_mask, and labels tensors.
 
         Returns:
             TaskOutput containing the loss and any computed metrics.
@@ -38,7 +37,3 @@ class BaseTask(ABC):
             Dictionary of metric names to values.
         """
         ...
-
-    def reset_metrics(self) -> None:
-        """Reset accumulated metrics. Override if task tracks metrics."""
-        pass
