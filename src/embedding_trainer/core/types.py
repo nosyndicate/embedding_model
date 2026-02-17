@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 class ModelOutput:
     """Output from a model forward pass."""
 
-    embeddings: Tensor
+    embeddings: Tensor | None = None
     loss: Tensor | None = None
     logits: Tensor | None = None
     hidden_states: tuple[Tensor, ...] | None = None
