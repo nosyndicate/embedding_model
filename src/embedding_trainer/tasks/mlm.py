@@ -1,7 +1,6 @@
 import torch
 from torch import nn
 
-from embedding_trainer.core.base_model import BaseEmbeddingModel
 from embedding_trainer.core.base_task import BaseTask
 from embedding_trainer.core.types import TaskOutput
 from embedding_trainer.data.base import LABEL_IGNORE_ID, PreTokenizedBatch
@@ -29,7 +28,7 @@ class MaskedLanguageModelingTask(BaseTask):
 
     def compute_loss(
         self,
-        model: BaseEmbeddingModel,
+        model: nn.Module,
         batch: PreTokenizedBatch,
         device: str = "cpu",
     ) -> TaskOutput:
@@ -45,10 +44,10 @@ class MaskedLanguageModelingTask(BaseTask):
         attention_mask = batch["attention_mask"]  # shape: (batch_size, seq_length)
         labels = batch["labels"]  # shape: (batch_size, seq_length)
 
-        if device == "cuda":
-            input_ids = input_ids.to(device, non_blocking=True)
-            attention_mask = attention_mask.to(device, non_blocking=True)
-            labels = labels.to(device, non_blocking=True, dtype=torch.long)
+        non_blocking = device == "cuda"
+        input_ids = input_ids.to(device, non_blocking=non_blocking)
+        attention_mask = attention_mask.to(device, non_blocking=non_blocking)
+        labels = labels.to(device, non_blocking=non_blocking, dtype=torch.long)
 
         # Forward pass through the model to get logits
         model_output = model(input_ids=input_ids, attention_mask=attention_mask)

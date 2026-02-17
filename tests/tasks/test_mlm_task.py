@@ -95,6 +95,16 @@ class TestMaskedLanguageModelingTask:
         assert not torch.isnan(output.loss).item()
         assert output.loss.item() == 0.0
 
+    def test_compute_loss_accepts_int32_labels(self) -> None:
+        model = DummyMLMModel(vocab_size=16)
+        task = MaskedLanguageModelingTask()
+        batch = _make_batch()
+        batch["labels"] = batch["labels"].to(torch.int32)
+
+        output = task.compute_loss(model, batch, device="cpu")
+
+        assert torch.isfinite(output.loss).item()
+
     def test_missing_logits_raises_value_error(self) -> None:
         model = NoLogitsModel()
         task = MaskedLanguageModelingTask()

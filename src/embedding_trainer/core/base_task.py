@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Any
+
+from torch import nn
 
 from embedding_trainer.core.types import TaskOutput
 from embedding_trainer.data.base import PreTokenizedBatch
@@ -18,12 +19,12 @@ class BaseTask(ABC):
 
     @abstractmethod
     def compute_loss(
-        self, model: Any, batch: PreTokenizedBatch, device: str
+        self, model: nn.Module, batch: PreTokenizedBatch, device: str
     ) -> TaskOutput:
         """Compute loss for a batch.
 
         Args:
-            model: The model to compute loss for.
+            model: The model (a PyTorch nn.Module) to compute loss for.
             batch: PreTokenizedBatch containing input_ids, attention_mask, and labels tensors.
 
         Returns:
