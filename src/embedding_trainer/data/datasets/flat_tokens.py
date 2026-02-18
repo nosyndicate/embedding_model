@@ -15,6 +15,7 @@ from torch.utils.data import Dataset
 from embedding_trainer.data.base import (
     HEADER_SIZE,
     MAGIC_NUMBER,
+    ROBERTA_VERSION,
     ShardHeader,
     ShardInfo,
 )
@@ -139,6 +140,21 @@ class FlatTokenDataset(Dataset):
         if parsed.magic != MAGIC_NUMBER:
             raise ValueError(
                 f"Invalid magic number in {path}: {parsed.magic} != {MAGIC_NUMBER}"
+            )
+
+        if parsed.version != ROBERTA_VERSION:
+            raise ValueError(
+                f"Invalid version in {path}: {parsed.version} != {ROBERTA_VERSION}"
+            )
+
+        # Validate file size matches token count (uint16 = 2 bytes)
+        expected_size = HEADER_SIZE * 4 + parsed.token_count * 2
+        actual_size = path.stat().st_size
+        if actual_size != expected_size:
+            raise ValueError(
+                f"Inconsistent file size in {path}: "
+                f"Expected {expected_size} bytes for {parsed.token_count} tokens, "
+                f"but found {actual_size} bytes."
             )
 
         return parsed

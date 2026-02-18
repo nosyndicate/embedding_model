@@ -21,6 +21,7 @@ def create_shard(
     num_tokens: int = 2048,
     *,
     magic: int = MAGIC_NUMBER,
+    version: int = ROBERTA_VERSION,
     vocab_size: int = 50265,
     pad_id: int = 1,
     sep_id: int = 2,
@@ -28,7 +29,7 @@ def create_shard(
     """Create a test shard and return the token array written."""
     header = np.zeros(HEADER_SIZE, dtype=np.int32)
     header[0] = magic
-    header[1] = ROBERTA_VERSION
+    header[1] = version
     header[2] = num_tokens
     header[3] = vocab_size
     header[4] = pad_id
@@ -89,6 +90,29 @@ class TestShardDiscovery:
         create_shard(tmp_path / "fineweb_train_000000.bin", magic=99999)
         cfg = FlatTokenConfig(data_dir=str(tmp_path))
         with pytest.raises(ValueError, match="Invalid magic number"):
+            FlatTokenDataset(cfg)
+
+    def test_invalid_version(self, tmp_path: Path) -> None:
+        create_shard(tmp_path / "fineweb_train_000000.bin", version=99)
+        cfg = FlatTokenConfig(data_dir=str(tmp_path))
+        with pytest.raises(ValueError, match="Invalid version"):
+            FlatTokenDataset(cfg)
+
+    def test_truncated_shard(self, tmp_path: Path) -> None:
+        path = tmp_path / "fineweb_train_000000.bin"
+        # Create shard header claiming 1024 tokens but write only 512
+        header = np.zeros(HEADER_SIZE, dtype=np.int32)
+        header[0] = MAGIC_NUMBER
+        header[1] = ROBERTA_VERSION
+        header[2] = 1024
+        tokens = np.zeros(512, dtype=np.uint16)
+
+        with open(path, "wb") as f:
+            f.write(header.tobytes())
+            f.write(tokens.tobytes())
+
+        cfg = FlatTokenConfig(data_dir=str(tmp_path))
+        with pytest.raises(ValueError, match="Inconsistent file size"):
             FlatTokenDataset(cfg)
 
     def test_only_matching_split(self, tmp_path: Path) -> None:

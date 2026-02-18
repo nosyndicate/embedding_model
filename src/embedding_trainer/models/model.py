@@ -282,14 +282,30 @@ class EmbeddingModel(BaseEmbeddingModel):
     def get_embeddings(
         self, input_ids: Tensor, attention_mask: Tensor | None = None
     ) -> Tensor:
-        # TODO: mask the padding position when we do mean pooling
+        """
+        Get embeddings for input sequences.
+
+        Args:
+            input_ids: Tensor of shape (batch_size, seq_length) containing token IDs.
+            attention_mask: Tensor of shape (batch_size, seq_length) or None
+                1 for position to keep, 0 for position to mask
+        Returns:
+            Tensor of shape (batch_size, hidden_size) containing the pooled embeddings.
+        """
         hidden_states = self.embedding(input_ids)
         for layer in self.transformer_layers:
             hidden_states = layer(hidden_states, attention_mask=attention_mask)
 
-        embeddings: Tensor = hidden_states.mean(
-            dim=1
-        )  # shape: (batch_size, hidden_size)
+        if attention_mask is None:
+            return hidden_states.mean(dim=1)
+
+        # Masked mean pooling
+        # attention_mask shape: (batch_size, seq_len)
+        # hidden_states shape: (batch_size, seq_len, hidden_size)
+        mask = attention_mask.unsqueeze(-1).expand(hidden_states.size()).float()
+        masked_sum = torch.sum(hidden_states * mask, dim=1)
+        mask_sum = torch.sum(mask, dim=1).clamp(min=1e-9)
+        embeddings: Tensor = masked_sum / mask_sum
         return embeddings
 
     @property

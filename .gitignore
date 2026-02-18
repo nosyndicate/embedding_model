@@ -209,3 +209,6 @@ __marimo__/
 # Ignore the data directory, which may contain large files
 /data/
 !tests/data/
+
+# Ignore some of the markdown plan files
+/markdowns

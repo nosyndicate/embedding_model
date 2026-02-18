@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import torch
-from tokenizers import Tokenizer
 from torch import Tensor
+from transformers import PreTrainedTokenizerBase
 
 from embedding_trainer.data.base import LABEL_IGNORE_ID, PreTokenizedBatch
 from embedding_trainer.data.collators.base import BaseCollator, BaseCollatorConfig
@@ -20,7 +20,7 @@ class MLMCollatorConfig(BaseCollatorConfig):
     mlm_probability: float = 0.30  # Probability of replacing with [MASK]
 
     @staticmethod
-    def from_tokenizer(tokenizer: Tokenizer) -> MLMCollatorConfig:
+    def from_tokenizer(tokenizer: PreTrainedTokenizerBase) -> MLMCollatorConfig:
         """Create config from a Hugging Face Tokenizer."""
         return MLMCollatorConfig(
             pad_token_id=tokenizer.pad_token_id,
