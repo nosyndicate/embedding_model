@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import torch
@@ -12,6 +13,7 @@ from embedding_trainer.data.loader import DataLoaderConfig, create_dataloader
 from embedding_trainer.data.registry import COLLATOR_REGISTRY, DATASET_REGISTRY
 from embedding_trainer.models.registry import MODEL_REGISTRY
 from embedding_trainer.tasks.registry import TASK_REGISTRY
+from embedding_trainer.utils import set_seed
 
 
 class PrintLossCallback(BaseCallback):
@@ -39,6 +41,8 @@ class SimpleTrainer(BaseTrainer):
         device: str,
         max_steps: int,
         callbacks: list[BaseCallback] | None = None,
+        scheduler: torch.optim.lr_scheduler.LRScheduler | None = None,
+        max_grad_norm: float | None = None,
     ) -> None:
         self.model = model
         self.task = task
@@ -47,6 +51,8 @@ class SimpleTrainer(BaseTrainer):
         self.device = device
         self.max_steps = max_steps
         self.callbacks = callbacks or []
+        self.scheduler = scheduler
+        self.max_grad_norm = max_grad_norm
         self.global_step = 0
 
     def train(self) -> TrainOutput:
@@ -70,7 +76,13 @@ class SimpleTrainer(BaseTrainer):
                     device=self.device,
                 )
                 task_output.loss.backward()
+                if self.max_grad_norm is not None:
+                    torch.nn.utils.clip_grad_norm_(
+                        self.model.parameters(), self.max_grad_norm
+                    )
                 self.optimizer.step()
+                if self.scheduler is not None:
+                    self.scheduler.step()
 
                 loss_value = float(task_output.loss.detach().cpu())
                 loss_sum += loss_value
@@ -109,6 +121,8 @@ class SimpleTrainer(BaseTrainer):
 
 
 def main() -> None:
+    set_seed(42)
+
     dataset_class = DATASET_REGISTRY.get("flat_tokens")
     dataset = dataset_class(
         FlatTokenConfig(
@@ -149,15 +163,48 @@ def main() -> None:
         ),
     )
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
+    no_decay = {"bias", "LayerNorm.weight", "LayerNorm.bias"}
+    param_groups = [
+        {
+            "params": [
+                p
+                for n, p in model.named_parameters()
+                if not any(nd in n for nd in no_decay)
+            ],
+            "weight_decay": 0.01,
+        },
+        {
+            "params": [
+                p
+                for n, p in model.named_parameters()
+                if any(nd in n for nd in no_decay)
+            ],
+            "weight_decay": 0.0,
+        },
+    ]
+    optimizer = torch.optim.AdamW(param_groups, lr=1e-4)
+
+    max_steps = 5000
+    warmup_steps = 500
+
+    def lr_lambda(current_step: int) -> float:
+        if current_step < warmup_steps:
+            return current_step / max(1, warmup_steps)
+        progress = (current_step - warmup_steps) / max(1, max_steps - warmup_steps)
+        return 0.5 * (1.0 + math.cos(math.pi * progress))
+
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+
     trainer = SimpleTrainer(
         model=model,
         task=task,
         loader=loader,
         optimizer=optimizer,
         device=device,
-        max_steps=5000,
+        max_steps=max_steps,
         callbacks=[PrintLossCallback(log_every=100)],
+        scheduler=scheduler,
+        max_grad_norm=1.0,
     )
     output = trainer.train()
     print(
