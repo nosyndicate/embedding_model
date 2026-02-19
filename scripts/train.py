@@ -1,129 +1,19 @@
 from __future__ import annotations
 
 import math
-from pathlib import Path
 
 import torch
 from transformers import AutoTokenizer
 
-from embedding_trainer.core import (
-    BaseCallback,
-    BaseTask,
-    BaseTrainer,
-    EvalOutput,
-    TrainOutput,
-)
+from embedding_trainer.callbacks import CALLBACK_REGISTRY
+from embedding_trainer.data import COLLATOR_REGISTRY, DATASET_REGISTRY
 from embedding_trainer.data.collators import MLMCollatorConfig
 from embedding_trainer.data.datasets import FlatTokenConfig
 from embedding_trainer.data.loader import DataLoaderConfig, create_dataloader
-from embedding_trainer.data.registry import COLLATOR_REGISTRY, DATASET_REGISTRY
-from embedding_trainer.models.registry import MODEL_REGISTRY
-from embedding_trainer.tasks.registry import TASK_REGISTRY
+from embedding_trainer.models import MODEL_REGISTRY
+from embedding_trainer.tasks import TASK_REGISTRY
+from embedding_trainer.training.trainer import SimpleTrainer
 from embedding_trainer.utils import set_seed
-
-
-class PrintLossCallback(BaseCallback):
-    def __init__(self, log_every: int = 1) -> None:
-        self.log_every = max(log_every, 1)
-
-    def on_train_begin(self, trainer: SimpleTrainer) -> None:
-        print(f"Starting training on {trainer.device}")
-
-    def on_step_end(self, trainer: SimpleTrainer, step: int, loss: float) -> None:
-        if step % self.log_every == 0:
-            print(f"step={step} loss={loss:.4f}")
-
-    def on_train_end(self, trainer: SimpleTrainer) -> None:
-        print("Training finished.")
-
-
-class SimpleTrainer(BaseTrainer):
-    def __init__(
-        self,
-        model: torch.nn.Module,
-        task: BaseTask,
-        loader: torch.utils.data.DataLoader,
-        optimizer: torch.optim.Optimizer,
-        device: str,
-        max_steps: int,
-        callbacks: list[BaseCallback] | None = None,
-        scheduler: torch.optim.lr_scheduler.LRScheduler | None = None,
-        max_grad_norm: float | None = None,
-    ) -> None:
-        self.model = model
-        self.task = task
-        self.loader = loader
-        self.optimizer = optimizer
-        self.device = device
-        self.max_steps = max_steps
-        self.callbacks = callbacks or []
-        self.scheduler = scheduler
-        self.max_grad_norm = max_grad_norm
-        self.global_step = 0
-
-    def train(self) -> TrainOutput:
-        self.model.train()
-        for callback in self.callbacks:
-            callback.on_train_begin(self)
-
-        loss_sum = 0.0
-        while self.global_step < self.max_steps:
-            for batch in self.loader:
-                if self.global_step >= self.max_steps:
-                    break
-
-                for callback in self.callbacks:
-                    callback.on_step_begin(self, self.global_step)
-
-                self.optimizer.zero_grad(set_to_none=True)
-                task_output = self.task.compute_loss(
-                    self.model,
-                    batch,
-                    device=self.device,
-                )
-                task_output.loss.backward()
-                if self.max_grad_norm is not None:
-                    torch.nn.utils.clip_grad_norm_(
-                        self.model.parameters(), self.max_grad_norm
-                    )
-                self.optimizer.step()
-                if self.scheduler is not None:
-                    self.scheduler.step()
-
-                loss_value = float(task_output.loss.detach().cpu())
-                loss_sum += loss_value
-                for callback in self.callbacks:
-                    callback.on_step_end(self, self.global_step, loss_value)
-
-                self.global_step += 1
-
-            if len(self.loader) == 0:
-                break
-
-        for callback in self.callbacks:
-            callback.on_train_end(self)
-
-        avg_loss = loss_sum / max(self.global_step, 1)
-        return TrainOutput(global_step=self.global_step, train_loss=avg_loss)
-
-    def evaluate(self) -> EvalOutput:
-        return EvalOutput(eval_loss=float("nan"))
-
-    def save_checkpoint(self, path: str | Path) -> None:
-        torch.save(
-            {
-                "model_state_dict": self.model.state_dict(),
-                "optimizer_state_dict": self.optimizer.state_dict(),
-                "global_step": self.global_step,
-            },
-            path,
-        )
-
-    def load_checkpoint(self, path: str | Path) -> None:
-        checkpoint = torch.load(path, map_location=self.device)
-        self.model.load_state_dict(checkpoint["model_state_dict"])
-        self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-        self.global_step = int(checkpoint.get("global_step", 0))
 
 
 def main() -> None:
@@ -169,6 +59,10 @@ def main() -> None:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device)
 
+    callbacks = [
+        CALLBACK_REGISTRY.get("print_loss")(log_every=100),
+    ]
+
     loader = create_dataloader(
         dataset=dataset,
         collator=collator,
@@ -201,7 +95,7 @@ def main() -> None:
         optimizer=optimizer,
         device=device,
         max_steps=max_steps,
-        callbacks=[PrintLossCallback(log_every=100)],
+        callbacks=callbacks,
         scheduler=scheduler,
         max_grad_norm=1.0,
     )
