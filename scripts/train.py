@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import math
 from pathlib import Path
 
@@ -17,6 +18,8 @@ from embedding_trainer.models import MODEL_REGISTRY
 from embedding_trainer.tasks import TASK_REGISTRY
 from embedding_trainer.training.trainer import SimpleTrainer
 from embedding_trainer.utils import set_seed
+
+logger = logging.getLogger(__name__)
 
 
 @hydra.main(version_base=None, config_path="../configs", config_name="train")
@@ -40,7 +43,7 @@ def main(cfg: DictConfig) -> None:
     header = dataset.header
     if header is None:
         raise ValueError("Dataset header is missing.")
-    print(f"Vocab size: {header.vocab_size}, Pad ID: {header.pad_id}")
+    logger.info(f"Vocab size: {header.vocab_size}, Pad ID: {header.pad_id}")
 
     tokenizer = AutoTokenizer.from_pretrained(
         cfg.tokenizer.tokenizer_name_or_path,
@@ -75,9 +78,11 @@ def main(cfg: DictConfig) -> None:
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device)
 
-    callbacks = [
-        CALLBACK_REGISTRY.get("print_loss")(log_every=100),
-    ]
+    callbacks = []
+    for _, cb_cfg in cfg.callbacks.items():
+        cb_cls = CALLBACK_REGISTRY.get(cb_cfg.name)
+        cb_kwargs = {k: v for k, v in cb_cfg.items() if k != "name"}
+        callbacks.append(cb_cls(**cb_kwargs))
 
     loader = create_dataloader(
         dataset=dataset,
@@ -154,11 +159,11 @@ def main(cfg: DictConfig) -> None:
     # Resume from latest checkpoint if available
     latest = SimpleTrainer.latest_checkpoint(checkpoint_dir)
     if latest is not None:
-        print(f"Resuming from checkpoint: {latest}")
+        logger.info(f"Resuming from checkpoint: {latest}")
         trainer.load_checkpoint(latest)
 
     output = trainer.train()
-    print(
+    logger.info(
         f"Done. global_step={output.global_step}, "
         f"avg_train_loss={output.train_loss:.4f}"
     )

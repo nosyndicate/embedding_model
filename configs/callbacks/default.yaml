@@ -1,0 +1,3 @@
+print_loss:
+  name: print_loss
+  log_every: 200
