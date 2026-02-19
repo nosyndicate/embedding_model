@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import pytest
 import torch
 from torch import Tensor
@@ -34,6 +36,9 @@ class DummyMLMModel(BaseEmbeddingModel):
         batch_size, seq_len = input_ids.shape
         return torch.zeros(batch_size, seq_len, self.hidden_size)
 
+    def get_param_groups(self, **kwargs: dict[str, Any]) -> list[dict[str, Any]]:
+        return [{"params": self.parameters()}]
+
     @property
     def hidden_size(self) -> int:
         return 8
@@ -51,6 +56,9 @@ class NoLogitsModel(BaseEmbeddingModel):
     ) -> Tensor:
         batch_size, seq_len = input_ids.shape
         return torch.zeros(batch_size, seq_len, self.hidden_size)
+
+    def get_param_groups(self, **kwargs: dict[str, Any]) -> list[dict[str, Any]]:
+        return [{"params": self.parameters()}]
 
     @property
     def hidden_size(self) -> int:

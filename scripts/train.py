@@ -6,7 +6,13 @@ from pathlib import Path
 import torch
 from transformers import AutoTokenizer
 
-from embedding_trainer.core import BaseCallback, BaseTrainer, EvalOutput, TrainOutput
+from embedding_trainer.core import (
+    BaseCallback,
+    BaseTask,
+    BaseTrainer,
+    EvalOutput,
+    TrainOutput,
+)
 from embedding_trainer.data.collators import MLMCollatorConfig
 from embedding_trainer.data.datasets import FlatTokenConfig
 from embedding_trainer.data.loader import DataLoaderConfig, create_dataloader
@@ -35,7 +41,7 @@ class SimpleTrainer(BaseTrainer):
     def __init__(
         self,
         model: torch.nn.Module,
-        task: object,
+        task: BaseTask,
         loader: torch.utils.data.DataLoader,
         optimizer: torch.optim.Optimizer,
         device: str,
@@ -163,26 +169,7 @@ def main() -> None:
         ),
     )
 
-    no_decay = {"bias", "LayerNorm.weight", "LayerNorm.bias"}
-    param_groups = [
-        {
-            "params": [
-                p
-                for n, p in model.named_parameters()
-                if not any(nd in n for nd in no_decay)
-            ],
-            "weight_decay": 0.01,
-        },
-        {
-            "params": [
-                p
-                for n, p in model.named_parameters()
-                if any(nd in n for nd in no_decay)
-            ],
-            "weight_decay": 0.0,
-        },
-    ]
-    optimizer = torch.optim.AdamW(param_groups, lr=1e-4)
+    optimizer = torch.optim.AdamW(model.get_param_groups(weight_decay=0.01), lr=1e-4)
 
     max_steps = 5000
     warmup_steps = 500
@@ -196,7 +183,7 @@ def main() -> None:
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
     trainer = SimpleTrainer(
-        model=model,
+        model=torch.compile(model),
         task=task,
         loader=loader,
         optimizer=optimizer,

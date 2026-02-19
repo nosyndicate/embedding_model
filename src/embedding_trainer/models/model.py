@@ -1,4 +1,5 @@
 import math
+from typing import Any
 
 import torch
 from torch import Tensor, nn
@@ -311,3 +312,29 @@ class EmbeddingModel(BaseEmbeddingModel):
     @property
     def hidden_size(self) -> int:
         return self._hidden_size
+
+    def get_param_groups(self, **kwargs: dict[str, Any]) -> list[dict[str, Any]]:
+        weight_decay = kwargs.get("weight_decay")
+        if weight_decay is not None:
+            no_decay = {"bias", "LayerNorm.weight", "LayerNorm.bias"}
+            param_groups: list[dict[str, Any]] = [
+                {
+                    "params": [
+                        p
+                        for n, p in self.named_parameters()
+                        if not any(nd in n for nd in no_decay)
+                    ],
+                    "weight_decay": weight_decay,
+                },
+                {
+                    "params": [
+                        p
+                        for n, p in self.named_parameters()
+                        if any(nd in n for nd in no_decay)
+                    ],
+                    "weight_decay": 0.0,
+                },
+            ]
+            return param_groups
+
+        return [{"params": list(self.parameters())}]

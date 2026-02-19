@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import Any
 
 from torch import Tensor, nn
 
@@ -46,6 +47,19 @@ class BaseEmbeddingModel(nn.Module, ABC):
         Returns:
             Embeddings tensor of shape (batch_size, hidden_size) or
             (batch_size, seq_length, hidden_size) depending on implementation.
+        """
+        ...
+
+    @abstractmethod
+    def get_param_groups(self, **kwargs: dict[str, Any]) -> list[dict[str, Any]]:
+        """Return parameter groups for optimization.
+
+        This can be used to apply different learning rates or weight decay to
+        different parts of the model (e.g., backbone vs. pooling layer).
+
+        Returns:
+            A list of parameter group dictionaries, each containing a 'params' key
+            with the parameters and optionally other keys like 'lr' or 'weight_decay'.
         """
         ...
 
