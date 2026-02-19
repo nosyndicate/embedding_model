@@ -1,9 +1,5 @@
 # RoBERTa-style flat token dataset configuration
-_target_: embedding_trainer.data.datasets.flat_tokens.FlatTokenDataset
-_recursive_: false
-
-config:
-  _target_: embedding_trainer.data.datasets.flat_tokens.FlatTokenConfig
-  data_dir: "${hydra:runtime.cwd}/data/fineweb_edu_100bt"
-  max_seq_length: 512
-  split: train
+name: flat_tokens
+data_dir: ${hydra:runtime.cwd}/data/fineweb_edu_100bt
+max_seq_length: 512
+split: train

@@ -1,0 +1,5 @@
+name: base_embedding_model
+vocab_size: 50265  # filled from tokenizer/header at runtime
+hidden_size: 512
+num_layers: 6
+num_heads: 8

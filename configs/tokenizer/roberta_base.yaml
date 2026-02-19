@@ -1,0 +1,2 @@
+tokenizer_name_or_path: roberta-base
+use_fast: true

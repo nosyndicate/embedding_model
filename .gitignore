@@ -212,3 +212,6 @@ __marimo__/
 
 # Ignore some of the markdown plan files
 /markdowns
+
+# Ignore the output directory from hydra
+/outputs

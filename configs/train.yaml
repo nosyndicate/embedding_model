@@ -1,0 +1,7 @@
+defaults:
+  - data: fineweb_edu_10bt
+  - collator: mlm
+  - model: base
+  - training: default
+  - tokenizer: roberta_base
+  - _self_

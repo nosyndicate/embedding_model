@@ -3,7 +3,9 @@ from __future__ import annotations
 import math
 from pathlib import Path
 
+import hydra
 import torch
+from omegaconf import DictConfig
 from transformers import AutoTokenizer
 
 from embedding_trainer.callbacks import CALLBACK_REGISTRY
@@ -17,15 +19,22 @@ from embedding_trainer.training.trainer import SimpleTrainer
 from embedding_trainer.utils import set_seed
 
 
-def main() -> None:
-    set_seed(42)
+@hydra.main(version_base=None, config_path="../configs", config_name="train")
+def main(cfg: DictConfig) -> None:
+    orig_cwd = hydra.utils.get_original_cwd()
 
-    dataset_class = DATASET_REGISTRY.get("flat_tokens")
+    set_seed(cfg.training.seed)
+
+    dataset_class = DATASET_REGISTRY.get(cfg.data.name)
+    data_dir = cfg.data.data_dir
+    if not Path(data_dir).is_absolute():
+        data_dir = str(Path(orig_cwd) / data_dir)
+
     dataset = dataset_class(
         FlatTokenConfig(
-            data_dir="./data/fineweb_edu_10bt",
-            max_seq_length=512,
-            split="train",
+            data_dir=data_dir,
+            max_seq_length=cfg.data.max_seq_length,
+            split=cfg.data.split,
         )
     )
     header = dataset.header
@@ -33,7 +42,10 @@ def main() -> None:
         raise ValueError("Dataset header is missing.")
     print(f"Vocab size: {header.vocab_size}, Pad ID: {header.pad_id}")
 
-    tokenizer = AutoTokenizer.from_pretrained("roberta-base", use_fast=True)
+    tokenizer = AutoTokenizer.from_pretrained(
+        cfg.tokenizer.tokenizer_name_or_path,
+        use_fast=cfg.tokenizer.use_fast,
+    )
 
     # Cross-check tokenizer IDs against shard header
     assert tokenizer.vocab_size == header.vocab_size, (
@@ -49,12 +61,15 @@ def main() -> None:
         f"Tokenizer mask_token_id ({tokenizer.mask_token_id}) != shard header ({header.mask_id})"
     )
 
-    collator_class = COLLATOR_REGISTRY.get("mlm")
+    collator_class = COLLATOR_REGISTRY.get(cfg.collator.name)
     collator = collator_class(MLMCollatorConfig.from_tokenizer(tokenizer))
 
-    task = TASK_REGISTRY.get("mlm")()
-    model = MODEL_REGISTRY.get("base_embedding_model")(
-        vocab_size=header.vocab_size, hidden_size=512, num_layers=4, num_heads=4
+    task = TASK_REGISTRY.get(cfg.collator.name)()
+    model = MODEL_REGISTRY.get(cfg.model.name)(
+        vocab_size=header.vocab_size,
+        hidden_size=cfg.model.hidden_size,
+        num_layers=cfg.model.num_layers,
+        num_heads=cfg.model.num_heads,
     )
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -68,9 +83,9 @@ def main() -> None:
         dataset=dataset,
         collator=collator,
         config=DataLoaderConfig(
-            batch_size=32,
-            num_workers=0,
-            prefetch_factor=2,
+            batch_size=cfg.training.batch_size,
+            num_workers=cfg.training.num_workers,
+            prefetch_factor=cfg.training.prefetch_factor,
             pin_memory=torch.cuda.is_available(),
             drop_last=True,
         ),
@@ -79,28 +94,31 @@ def main() -> None:
     # Validation dataset and loader
     val_dataset = dataset_class(
         FlatTokenConfig(
-            data_dir="./data/fineweb_edu_10bt",
-            max_seq_length=512,
-            split="train",
+            data_dir=data_dir,
+            max_seq_length=cfg.data.max_seq_length,
+            split=cfg.data.split,
         )
     )
     val_loader = create_dataloader(
         dataset=val_dataset,
         collator=collator,
         config=DataLoaderConfig(
-            batch_size=32,
-            num_workers=0,
-            prefetch_factor=2,
+            batch_size=cfg.training.batch_size,
+            num_workers=cfg.training.num_workers,
+            prefetch_factor=cfg.training.prefetch_factor,
             pin_memory=torch.cuda.is_available(),
             drop_last=False,
             shuffle=False,
         ),
     )
 
-    optimizer = torch.optim.AdamW(model.get_param_groups(weight_decay=0.01), lr=1e-4)
+    optimizer = torch.optim.AdamW(
+        model.get_param_groups(weight_decay=cfg.training.weight_decay),
+        lr=cfg.training.lr,
+    )
 
-    max_steps = 5000
-    warmup_steps = 500
+    max_steps = cfg.training.max_steps
+    warmup_steps = cfg.training.warmup_steps
 
     def lr_lambda(current_step: int) -> float:
         if current_step < warmup_steps:
@@ -110,11 +128,15 @@ def main() -> None:
 
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
-    checkpoint_dir = Path("./checkpoints")
+    checkpoint_dir = Path(cfg.training.checkpoint_dir)
+    if not checkpoint_dir.is_absolute():
+        checkpoint_dir = Path(orig_cwd) / checkpoint_dir
     checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
+    compiled_model = torch.compile(model) if cfg.training.compile else model
+
     trainer = SimpleTrainer(
-        model=torch.compile(model),
+        model=compiled_model,
         task=task,
         loader=loader,
         optimizer=optimizer,
@@ -122,11 +144,11 @@ def main() -> None:
         max_steps=max_steps,
         callbacks=callbacks,
         scheduler=scheduler,
-        max_grad_norm=1.0,
+        max_grad_norm=cfg.training.max_grad_norm,
         eval_loader=val_loader,
-        eval_every=500,
+        eval_every=cfg.training.eval_every,
         checkpoint_dir=checkpoint_dir,
-        save_every=500,
+        save_every=cfg.training.save_every,
     )
 
     # Resume from latest checkpoint if available

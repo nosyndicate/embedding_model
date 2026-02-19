@@ -1,19 +1,4 @@
 # MLM (Masked Language Model) collator configuration
-_target_: embedding_trainer.data.collators.mlm.MLMCollator
-
-config:
-  _target_: embedding_trainer.data.collators.mlm.MLMCollatorConfig
-  mlm_probability: 0.15
-  mask_replace_prob: 0.8   # 80% replaced with [MASK]
-  random_replace_prob: 0.1  # 10% replaced with random token
-  # Remaining 10% kept unchanged
-
-  # BERT special token IDs
-  pad_token_id: 0
-  cls_token_id: 101
-  sep_token_id: 102
-  mask_token_id: 103
-  vocab_size: 30522
-
-  # Padding for tensor core efficiency
-  pad_to_multiple_of: 8
+name: mlm
+mlm_probability: 0.30
+pad_to_multiple_of: 8
