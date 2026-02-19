@@ -67,7 +67,8 @@ class MaskedLanguageModelingTask(BaseTask):
         valid_labels = labels[valid_positions]  # shape: (num_masked_tokens,)
 
         loss = loss_fct(valid_logits, valid_labels)
-        return TaskOutput(loss=loss)
+        num_masked = int(valid_positions.sum())
+        return TaskOutput(loss=loss, metrics={"num_masked": float(num_masked)})
 
     def get_metrics(self) -> dict[str, float]:
         """Return task metrics accumulated since last reset."""

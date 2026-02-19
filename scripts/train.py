@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+from pathlib import Path
 
 import torch
 from transformers import AutoTokenizer
@@ -75,6 +76,27 @@ def main() -> None:
         ),
     )
 
+    # Validation dataset and loader
+    val_dataset = dataset_class(
+        FlatTokenConfig(
+            data_dir="./data/fineweb_edu_10bt",
+            max_seq_length=512,
+            split="train",
+        )
+    )
+    val_loader = create_dataloader(
+        dataset=val_dataset,
+        collator=collator,
+        config=DataLoaderConfig(
+            batch_size=32,
+            num_workers=0,
+            prefetch_factor=2,
+            pin_memory=torch.cuda.is_available(),
+            drop_last=False,
+            shuffle=False,
+        ),
+    )
+
     optimizer = torch.optim.AdamW(model.get_param_groups(weight_decay=0.01), lr=1e-4)
 
     max_steps = 5000
@@ -88,6 +110,9 @@ def main() -> None:
 
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
 
+    checkpoint_dir = Path("./checkpoints")
+    checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
     trainer = SimpleTrainer(
         model=torch.compile(model),
         task=task,
@@ -98,7 +123,18 @@ def main() -> None:
         callbacks=callbacks,
         scheduler=scheduler,
         max_grad_norm=1.0,
+        eval_loader=val_loader,
+        eval_every=500,
+        checkpoint_dir=checkpoint_dir,
+        save_every=500,
     )
+
+    # Resume from latest checkpoint if available
+    latest = SimpleTrainer.latest_checkpoint(checkpoint_dir)
+    if latest is not None:
+        print(f"Resuming from checkpoint: {latest}")
+        trainer.load_checkpoint(latest)
+
     output = trainer.train()
     print(
         f"Done. global_step={output.global_step}, "
