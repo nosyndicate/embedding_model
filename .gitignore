@@ -215,3 +215,6 @@ __marimo__/
 
 # Ignore the output directory from hydra
 /outputs
+
+# Ignore the dist directory, which may contain built distributions
+dist/
