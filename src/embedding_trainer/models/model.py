@@ -58,7 +58,6 @@ def precompute_rope_cache(
     dim: int,
     max_seq_len: int,
     base: int = 10000,
-    device: str = "cpu",
     dtype: torch.dtype = torch.float32,
 ) -> tuple[Tensor, Tensor]:
     """Precompute the frequencies for RoPE:
@@ -72,7 +71,6 @@ def precompute_rope_cache(
         max_seq_len: The maximum sequence length to precompute for.
         base: The base for computing the frequencies (default: 10000).
             Higher base means slower decay of frequencies, which can be beneficial for longer sequences.
-        device: The device to store the precomputed frequencies on (e.g., 'cpu' or 'cuda').
         dtype: The data type for the precomputed frequencies (default: torch.float32 to avoid
             precision issue with sine/cosine computation).
 
@@ -83,13 +81,11 @@ def precompute_rope_cache(
 
     # Compute theta for each dimension
     theta = 1.0 / (
-        base ** (torch.arange(0, dim, 2, device=device, dtype=dtype) / dim)
+        base ** (torch.arange(0, dim, 2, dtype=dtype) / dim)
     )  # shape: (dim // 2,)
 
     # Create the position indices for all positions
-    seq_index = torch.arange(
-        max_seq_len, device=device, dtype=dtype
-    )  # shape: (max_seq_len,)
+    seq_index = torch.arange(max_seq_len, dtype=dtype)  # shape: (max_seq_len,)
 
     # Compute the rotation angle, m * theta, for all positions and dimensions
     index_theta = torch.outer(seq_index, theta)  # shape: (max_seq_len, dim // 2)
@@ -133,8 +129,6 @@ class SelfAttention(nn.Module):
         num_heads: int,
         dropout: float = 0.1,
         max_seq_len: int = 512,
-        device: str = "cpu",
-        dtype: torch.dtype = torch.float32,
     ) -> None:
         super().__init__()
         self.max_seq_len = max_seq_len
@@ -147,9 +141,7 @@ class SelfAttention(nn.Module):
         self.d_k = hidden_size // num_heads
         self.sqrt_d_k = math.sqrt(self.d_k)
         self.dropout = nn.Dropout(dropout)
-        cos, sin = precompute_rope_cache(
-            dim=self.d_k, max_seq_len=self.max_seq_len, device=device, dtype=dtype
-        )
+        cos, sin = precompute_rope_cache(dim=self.d_k, max_seq_len=self.max_seq_len)
         self.register_buffer("cos_cache", cos, persistent=True)
         self.register_buffer("sin_cache", sin, persistent=True)
 
@@ -210,8 +202,6 @@ class TransformerLayer(nn.Module):
         num_heads: int,
         dropout: float = 0.1,
         max_seq_len: int = 512,
-        device: str = "cpu",
-        dtype: torch.dtype = torch.float32,
     ) -> None:
         super().__init__()
         self.attention = SelfAttention(
@@ -219,8 +209,6 @@ class TransformerLayer(nn.Module):
             num_heads,
             dropout=dropout,
             max_seq_len=max_seq_len,
-            device=device,
-            dtype=dtype,
         )
         self.norm1 = nn.LayerNorm(hidden_size)
         self.mlp = nn.Sequential(
