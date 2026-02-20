@@ -67,7 +67,7 @@ def main(cfg: DictConfig) -> None:
     collator_class = COLLATOR_REGISTRY.get(cfg.collator.name)
     collator = collator_class(MLMCollatorConfig.from_tokenizer(tokenizer))
 
-    task = TASK_REGISTRY.get(cfg.collator.name)()
+    task = TASK_REGISTRY.get(cfg.task.name)()
     model = MODEL_REGISTRY.get(cfg.model.name)(
         vocab_size=header.vocab_size,
         hidden_size=cfg.model.hidden_size,

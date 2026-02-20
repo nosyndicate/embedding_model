@@ -41,10 +41,10 @@ Shard format (v3):
         [1] = 3           # version (3 for RoBERTa-style flat stream)
         [2] = token_count # number of uint16 tokens
         [3] = vocab_size  # 50265 for roberta-base
-        [4] = pad_id      # 0
-        [5] = cls_id      # 101
-        [6] = sep_id      # 102
-        [7] = mask_id     # 103
+        [4] = pad_id      # 1 for roberta-base (<pad>)
+        [5] = cls_id      # 0 for roberta-base (<s>)
+        [6] = sep_id      # 2 for roberta-base (</s>)
+        [7] = mask_id     # 50264 for roberta-base (<mask>)
 
     Tokens (uint16[]):
         tok tok tok ... [SEP] tok tok tok ... [SEP] ...

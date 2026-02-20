@@ -7,6 +7,8 @@ from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from torch import Tensor
 
+from embedding_trainer.data.base import PreTokenizedBatch
+
 if TYPE_CHECKING:
     pass
 
@@ -16,10 +18,9 @@ class ModelOutput:
     """Output from a model forward pass."""
 
     embeddings: Tensor | None = None
-    loss: Tensor | None = None
     logits: Tensor | None = None
-    hidden_states: tuple[Tensor, ...] | None = None
-    attentions: tuple[Tensor, ...] | None = None
+    hidden_states: Tensor | None = None
+    attentions: Tensor | None = None
 
 
 @dataclass
@@ -81,7 +82,9 @@ class TrainerProtocol(Protocol):
 class TaskProtocol(Protocol):
     """Protocol for training tasks."""
 
-    def compute_loss(self, model: Any, batch: dict[str, Tensor]) -> TaskOutput:
+    def compute_loss(
+        self, model: Any, batch: PreTokenizedBatch, device: str
+    ) -> TaskOutput:
         """Compute loss for a batch."""
         ...
 
