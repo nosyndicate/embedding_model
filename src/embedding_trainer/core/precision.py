@@ -94,7 +94,7 @@ class FP16Precision(PrecisionContext):
     @contextmanager
     def autocast_context(self) -> Generator[None, None, None]:
         """Enable autocast for FP16."""
-        with autocast(dtype=torch.float16):
+        with autocast(device_type="cuda", dtype=torch.float16):
             yield
 
     def scale_loss(self, loss: Tensor) -> Tensor:
@@ -117,7 +117,7 @@ class BF16Precision(PrecisionContext):
     @contextmanager
     def autocast_context(self) -> Generator[None, None, None]:
         """Enable autocast for BF16."""
-        with autocast(dtype=torch.bfloat16):
+        with autocast(device_type="cuda", dtype=torch.bfloat16):
             yield
 
     def scale_loss(self, loss: Tensor) -> Tensor:
