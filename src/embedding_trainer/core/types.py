@@ -82,7 +82,9 @@ class TrainerProtocol(Protocol):
 class TaskProtocol(Protocol):
     """Protocol for training tasks."""
 
-    def compute_loss(self, model: Any, batch: PreTokenizedBatch) -> TaskOutput:
+    def compute_loss(
+        self, model: Any, batch: PreTokenizedBatch, device: str
+    ) -> TaskOutput:
         """Compute loss for a batch."""
         ...
 
