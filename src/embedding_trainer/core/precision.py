@@ -9,7 +9,8 @@ from typing import TYPE_CHECKING
 
 import torch
 from torch import Tensor
-from torch.cuda.amp import GradScaler, autocast
+from torch.amp.autocast_mode import autocast
+from torch.amp.grad_scaler import GradScaler
 
 if TYPE_CHECKING:
     from torch.optim import Optimizer
