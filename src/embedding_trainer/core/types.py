@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Protocol, TypedDict, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 from torch import Tensor
+
+from embedding_trainer.data.base import PreTokenizedBatch
 
 if TYPE_CHECKING:
     pass
@@ -80,7 +82,7 @@ class TrainerProtocol(Protocol):
 class TaskProtocol(Protocol):
     """Protocol for training tasks."""
 
-    def compute_loss(self, model: Any, batch: TypedDict) -> TaskOutput:
+    def compute_loss(self, model: Any, batch: PreTokenizedBatch) -> TaskOutput:
         """Compute loss for a batch."""
         ...
 
