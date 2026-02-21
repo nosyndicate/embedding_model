@@ -183,13 +183,13 @@ class SelfAttention(nn.Module):
             attn_weights = attn_weights.masked_fill(key_padding, float("-inf"))
 
         attn_weights = torch.softmax(attn_weights, dim=-1)  # shape:(B, N_H, T, T)
-
+        attn_weights = self.dropout(attn_weights)
         attn_output = torch.matmul(attn_weights, v)  # shape: (B, N_H, T, d_k)
         attn_output = (
             attn_output.transpose(1, 2).contiguous().view(B, T, -1)
         )  # shape: (B, T, hidden_size)
         attn_output = self.out_proj(attn_output)  # shape: (B, T, hidden_size)
-        attn_output = self.dropout(attn_output)
+
         return attn_output
 
 
@@ -256,6 +256,7 @@ class EmbeddingModel(BaseEmbeddingModel):
         self.transformer_layers = nn.ModuleList(
             [TransformerLayer(hidden_size, num_heads) for _ in range(num_layers)]
         )
+        self.norm = nn.LayerNorm(hidden_size)
         self.head = nn.Linear(hidden_size, vocab_size)
 
     def forward(
@@ -265,6 +266,7 @@ class EmbeddingModel(BaseEmbeddingModel):
         for layer in self.transformer_layers:
             hidden_states = layer(hidden_states, attention_mask=attention_mask)
 
+        hidden_states = self.norm(hidden_states)
         logits = self.head(hidden_states)
         return ModelOutput(hidden_states=hidden_states, logits=logits)
 
