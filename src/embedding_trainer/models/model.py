@@ -287,6 +287,7 @@ class EmbeddingModel(BaseEmbeddingModel):
         for layer in self.transformer_layers:
             hidden_states = layer(hidden_states, attention_mask=attention_mask)
 
+        hidden_states = self.norm(hidden_states)
         if attention_mask is None:
             return hidden_states.mean(dim=1)
 
