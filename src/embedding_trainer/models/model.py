@@ -263,6 +263,19 @@ class EmbeddingModel(BaseEmbeddingModel):
             nn.LayerNorm(hidden_size),
             nn.Linear(hidden_size, vocab_size),
         )
+        self.init_weights()
+
+    def init_weights(self) -> None:
+        for module in self.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.trunc_normal_(module.weight, std=0.02)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+            elif isinstance(module, nn.Embedding):
+                nn.init.trunc_normal_(module.weight, std=0.02)
+            elif isinstance(module, nn.LayerNorm):
+                nn.init.ones_(module.weight)
+                nn.init.zeros_(module.bias)
 
     def forward(
         self, input_ids: Tensor, attention_mask: Tensor | None = None
