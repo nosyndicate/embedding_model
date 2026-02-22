@@ -37,7 +37,7 @@ def main(cfg: DictConfig) -> None:
         FlatTokenConfig(
             data_dir=data_dir,
             max_seq_length=cfg.data.max_seq_length,
-            split=cfg.data.split,
+            split=cfg.data.train_split,
         )
     )
     header = dataset.header
@@ -101,7 +101,7 @@ def main(cfg: DictConfig) -> None:
         FlatTokenConfig(
             data_dir=data_dir,
             max_seq_length=cfg.data.max_seq_length,
-            split=cfg.data.split,
+            split=cfg.data.validation_split,
         )
     )
     val_loader = create_dataloader(
