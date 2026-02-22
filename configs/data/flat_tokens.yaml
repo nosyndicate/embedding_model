@@ -2,4 +2,5 @@
 name: flat_tokens
 data_dir: ${hydra:runtime.cwd}/data/fineweb_edu_100bt
 max_seq_length: 512
-split: train
+train_split: train
+validation_split: val

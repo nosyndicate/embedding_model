@@ -43,13 +43,14 @@ class SimpleTrainer(BaseTrainer):
         )
         self.save_every = save_every
         self.global_step = 0
+        self.cumulative_loss_sum = 0.0
+        self.cumulative_loss_steps = 0
 
     def train(self) -> TrainOutput:
         self.model.train()
         for callback in self.callbacks:
             callback.on_train_begin(self)
 
-        loss_sum = 0.0
         while self.global_step < self.max_steps:
             for batch in self.loader:
                 if self.global_step >= self.max_steps:
@@ -74,7 +75,8 @@ class SimpleTrainer(BaseTrainer):
                     self.scheduler.step()
 
                 loss_value = float(task_output.loss.detach().cpu())
-                loss_sum += loss_value
+                self.cumulative_loss_sum += loss_value
+                self.cumulative_loss_steps += 1
                 for callback in self.callbacks:
                     callback.on_step_end(self, self.global_step, loss_value)
 
@@ -106,7 +108,7 @@ class SimpleTrainer(BaseTrainer):
         for callback in self.callbacks:
             callback.on_train_end(self)
 
-        avg_loss = loss_sum / max(self.global_step, 1)
+        avg_loss = self.cumulative_loss_sum / max(self.cumulative_loss_steps, 1)
         return TrainOutput(global_step=self.global_step, train_loss=avg_loss)
 
     def evaluate(self) -> EvalOutput:
@@ -145,16 +147,25 @@ class SimpleTrainer(BaseTrainer):
             "model_state_dict": self.model.state_dict(),
             "optimizer_state_dict": self.optimizer.state_dict(),
             "global_step": self.global_step,
+            "cumulative_loss_sum": self.cumulative_loss_sum,
+            "cumulative_loss_steps": self.cumulative_loss_steps,
         }
         if self.scheduler is not None:
             checkpoint["scheduler_state_dict"] = self.scheduler.state_dict()
         torch.save(checkpoint, path)
 
     def load_checkpoint(self, path: str | Path) -> None:
-        checkpoint = torch.load(path, map_location=self.device)
+        checkpoint = torch.load(path, map_location=self.device, weights_only=True)
         self.model.load_state_dict(checkpoint["model_state_dict"])
         self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
         self.global_step = int(checkpoint.get("global_step", 0))
+        self.cumulative_loss_sum = float(checkpoint.get("cumulative_loss_sum", 0.0))
+        if "cumulative_loss_steps" in checkpoint:
+            self.cumulative_loss_steps = int(checkpoint["cumulative_loss_steps"])
+        elif "cumulative_loss_sum" in checkpoint:
+            self.cumulative_loss_steps = self.global_step
+        else:
+            self.cumulative_loss_steps = 0
         if self.scheduler is not None and "scheduler_state_dict" in checkpoint:
             self.scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
 

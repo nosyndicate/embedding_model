@@ -135,9 +135,9 @@ class SelfAttention(nn.Module):
         self.project = nn.Linear(hidden_size, hidden_size * 3)
         self.out_proj = nn.Linear(hidden_size, hidden_size)
         self.num_heads = num_heads
-        assert hidden_size % num_heads == 0, (
-            "hidden_size must be divisible by num_heads"
-        )
+        assert (
+            hidden_size % num_heads == 0
+        ), "hidden_size must be divisible by num_heads"
         self.d_k = hidden_size // num_heads
         self.sqrt_d_k = math.sqrt(self.d_k)
         self.dropout = nn.Dropout(dropout)
@@ -257,7 +257,12 @@ class EmbeddingModel(BaseEmbeddingModel):
             [TransformerLayer(hidden_size, num_heads) for _ in range(num_layers)]
         )
         self.norm = nn.LayerNorm(hidden_size)
-        self.head = nn.Linear(hidden_size, vocab_size)
+        self.head = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size),
+            nn.GELU(),
+            nn.LayerNorm(hidden_size),
+            nn.Linear(hidden_size, vocab_size),
+        )
 
     def forward(
         self, input_ids: Tensor, attention_mask: Tensor | None = None
