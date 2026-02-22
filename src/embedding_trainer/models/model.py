@@ -326,7 +326,7 @@ class EmbeddingModel(BaseEmbeddingModel):
         """
         weight_decay = kwargs.get("weight_decay")
         if weight_decay is not None:
-            # Collect all parameter names belonging to LayerNorm modules
+            # Collect all parameter names belonging to LayerNorm or Embedding modules
             no_decay_params: set[str] = set()
             for module_name, module in self.named_modules():
                 if isinstance(module, (nn.LayerNorm, nn.Embedding)):
