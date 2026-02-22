@@ -132,8 +132,8 @@ class SelfAttention(nn.Module):
     ) -> None:
         super().__init__()
         self.max_seq_len = max_seq_len
-        self.project = nn.Linear(hidden_size, hidden_size * 3)
-        self.out_proj = nn.Linear(hidden_size, hidden_size)
+        self.project = nn.Linear(hidden_size, hidden_size * 3, bias=False)
+        self.out_proj = nn.Linear(hidden_size, hidden_size, bias=False)
         self.num_heads = num_heads
         assert hidden_size % num_heads == 0, (
             "hidden_size must be divisible by num_heads"
@@ -212,10 +212,10 @@ class TransformerLayer(nn.Module):
         )
         self.norm1 = nn.LayerNorm(hidden_size)
         self.mlp = nn.Sequential(
-            nn.Linear(hidden_size, 4 * hidden_size),
+            nn.Linear(hidden_size, 4 * hidden_size, bias=False),
             nn.GELU(),
             nn.Dropout(dropout),
-            nn.Linear(4 * hidden_size, hidden_size),
+            nn.Linear(4 * hidden_size, hidden_size, bias=False),
         )
         self.norm2 = nn.LayerNorm(hidden_size)
         self.dropout = nn.Dropout(dropout)
