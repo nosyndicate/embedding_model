@@ -135,9 +135,9 @@ class SelfAttention(nn.Module):
         self.project = nn.Linear(hidden_size, hidden_size * 3, bias=False)
         self.out_proj = nn.Linear(hidden_size, hidden_size, bias=False)
         self.num_heads = num_heads
-        assert (
-            hidden_size % num_heads == 0
-        ), "hidden_size must be divisible by num_heads"
+        assert hidden_size % num_heads == 0, (
+            "hidden_size must be divisible by num_heads"
+        )
         self.d_k = hidden_size // num_heads
         self.sqrt_d_k = math.sqrt(self.d_k)
         self.dropout = nn.Dropout(dropout)
@@ -310,15 +310,35 @@ class EmbeddingModel(BaseEmbeddingModel):
         return self._hidden_size
 
     def get_param_groups(self, **kwargs: dict[str, Any]) -> list[dict[str, Any]]:
+        """Return parameter groups for optimization.
+
+        When ``weight_decay`` is provided, parameters are split into two groups:
+
+        * **Decayed** – all parameters that are *not* excluded below.
+        * **No decay** (``weight_decay=0.0``) – the following parameters are
+          excluded from weight decay:
+
+          - All bias parameters (any parameter whose name ends with ``.bias``).
+          - All parameters belonging to ``nn.LayerNorm`` and
+            ``nn.Embedding`` modules, detected via ``isinstance`` checks on
+            the module tree so that layers inside ``nn.Sequential``
+            containers (e.g. ``head.2.weight``) are correctly identified.
+        """
         weight_decay = kwargs.get("weight_decay")
         if weight_decay is not None:
-            no_decay = {"bias", "LayerNorm.weight", "LayerNorm.bias"}
+            # Collect all parameter names belonging to LayerNorm modules
+            no_decay_params: set[str] = set()
+            for module_name, module in self.named_modules():
+                if isinstance(module, (nn.LayerNorm, nn.Embedding)):
+                    for param_name, _ in module.named_parameters():
+                        no_decay_params.add(f"{module_name}.{param_name}")
+
             param_groups: list[dict[str, Any]] = [
                 {
                     "params": [
                         p
                         for n, p in self.named_parameters()
-                        if not any(nd in n for nd in no_decay)
+                        if n not in no_decay_params and not n.endswith(".bias")
                     ],
                     "weight_decay": weight_decay,
                 },
@@ -326,7 +346,7 @@ class EmbeddingModel(BaseEmbeddingModel):
                     "params": [
                         p
                         for n, p in self.named_parameters()
-                        if any(nd in n for nd in no_decay)
+                        if n in no_decay_params or n.endswith(".bias")
                     ],
                     "weight_decay": 0.0,
                 },
