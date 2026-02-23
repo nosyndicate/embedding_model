@@ -14,6 +14,7 @@ from embedding_trainer.data import COLLATOR_REGISTRY, DATASET_REGISTRY
 from embedding_trainer.data.collators import MLMCollatorConfig
 from embedding_trainer.data.datasets import FlatTokenConfig
 from embedding_trainer.data.loader import DataLoaderConfig, create_dataloader
+from embedding_trainer.data.sampler import ResumableSampler
 from embedding_trainer.models import MODEL_REGISTRY
 from embedding_trainer.tasks import TASK_REGISTRY
 from embedding_trainer.training.trainer import SimpleTrainer
@@ -84,6 +85,8 @@ def main(cfg: DictConfig) -> None:
         cb_kwargs = {k: v for k, v in cb_cfg.items() if k != "name"}
         callbacks.append(cb_cls(**cb_kwargs))
 
+    sampler = ResumableSampler(dataset, seed=cfg.training.seed)
+
     loader = create_dataloader(
         dataset=dataset,
         collator=collator,
@@ -94,6 +97,7 @@ def main(cfg: DictConfig) -> None:
             pin_memory=torch.cuda.is_available(),
             drop_last=True,
         ),
+        sampler=sampler,
     )
 
     # Validation dataset and loader
@@ -154,6 +158,7 @@ def main(cfg: DictConfig) -> None:
         eval_every=cfg.training.eval_every,
         checkpoint_dir=checkpoint_dir,
         save_every=cfg.training.save_every,
+        sampler=sampler,
     )
 
     # Resume from latest checkpoint if available

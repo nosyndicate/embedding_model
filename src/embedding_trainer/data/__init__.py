@@ -17,6 +17,7 @@ from embedding_trainer.data.loader import (
     create_distributed_dataloader,
 )
 from embedding_trainer.data.registry import COLLATOR_REGISTRY, DATASET_REGISTRY
+from embedding_trainer.data.sampler import ResumableSampler
 
 __all__ = [
     "CollatorProtocol",
@@ -30,5 +31,6 @@ __all__ = [
     "ShardHeader",
     "ShardInfo",
     "create_dataloader",
+    "ResumableSampler",
     "create_distributed_dataloader",
 ]

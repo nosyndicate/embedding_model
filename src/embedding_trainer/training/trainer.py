@@ -8,6 +8,7 @@ import torch
 
 from embedding_trainer.core import BaseCallback, BaseTask, EvalOutput, TrainOutput
 from embedding_trainer.core.base_trainer import BaseTrainer
+from embedding_trainer.data.sampler import ResumableSampler
 
 
 class SimpleTrainer(BaseTrainer):
@@ -26,6 +27,7 @@ class SimpleTrainer(BaseTrainer):
         eval_every: int | None = None,
         checkpoint_dir: str | Path | None = None,
         save_every: int | None = None,
+        sampler: ResumableSampler | None = None,
     ) -> None:
         self.model = model
         self.task = task
@@ -42,6 +44,7 @@ class SimpleTrainer(BaseTrainer):
             Path(checkpoint_dir) if checkpoint_dir is not None else None
         )
         self.save_every = save_every
+        self.sampler = sampler
         self.global_step = 0
         self.cumulative_loss_sum = 0.0
         self.cumulative_loss_steps = 0
@@ -81,6 +84,8 @@ class SimpleTrainer(BaseTrainer):
                     callback.on_step_end(self, self.global_step, loss_value)
 
                 self.global_step += 1
+                if self.sampler is not None:
+                    self.sampler.advance(self.loader.batch_size)
 
                 if (
                     self.eval_every is not None
@@ -152,6 +157,8 @@ class SimpleTrainer(BaseTrainer):
         }
         if self.scheduler is not None:
             checkpoint["scheduler_state_dict"] = self.scheduler.state_dict()
+        if self.sampler is not None:
+            checkpoint["sampler_state_dict"] = self.sampler.state_dict()
         torch.save(checkpoint, path)
 
     def load_checkpoint(self, path: str | Path) -> None:
@@ -168,6 +175,8 @@ class SimpleTrainer(BaseTrainer):
             self.cumulative_loss_steps = 0
         if self.scheduler is not None and "scheduler_state_dict" in checkpoint:
             self.scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+        if self.sampler is not None and "sampler_state_dict" in checkpoint:
+            self.sampler.load_state_dict(checkpoint["sampler_state_dict"])
 
     @staticmethod
     def latest_checkpoint(checkpoint_dir: str | Path) -> Path | None:
