@@ -89,17 +89,28 @@ class TestResumableSampler:
 
         assert first_part + second_part == all_indices
 
-    def test_epoch_advances_after_full_iteration(self) -> None:
-        """After exhausting one epoch, the sampler moves to the next epoch."""
+    def test_iter_does_not_mutate_state(self) -> None:
+        """Exhausting __iter__ must not change epoch or start_index."""
+        ds = _FakeDataset(10)
+        s = ResumableSampler(ds, seed=0)
+
+        state_before = s.state_dict().copy()
+        _ = list(s)
+        state_after = s.state_dict()
+
+        assert state_before == state_after
+
+    def test_epoch_advances_after_start_new_epoch(self) -> None:
+        """start_new_epoch() increments epoch and resets index."""
         ds = _FakeDataset(10)
         s = ResumableSampler(ds, seed=0)
 
         assert s.state_dict()["epoch"] == 0
 
-        # Exhaust epoch 0
+        # Exhaust epoch 0 and explicitly advance
         _ = list(s)
+        s.start_new_epoch()
 
-        # After full iteration, epoch should have advanced
         assert s.state_dict()["epoch"] == 1
         assert s.state_dict()["index"] == 0
 
@@ -110,7 +121,7 @@ class TestResumableSampler:
         s = ResumableSampler(ds, seed=0)
         epoch0 = list(s)  # exhausts epoch 0
 
-        # s is now at epoch 1 with a fresh permutation
+        s.start_new_epoch()
         epoch1 = list(s)
 
         assert epoch0 != epoch1

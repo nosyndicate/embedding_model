@@ -85,7 +85,7 @@ class SimpleTrainer(BaseTrainer):
 
                 self.global_step += 1
                 if self.sampler is not None:
-                    self.sampler.advance(self.loader.batch_size)
+                    self.sampler.advance(batch["input_ids"].shape[0])
 
                 if (
                     self.eval_every is not None
@@ -102,6 +102,11 @@ class SimpleTrainer(BaseTrainer):
                     self.save_checkpoint(
                         self.checkpoint_dir / f"step_{self.global_step}.pt"
                     )
+            else:
+                # Epoch completed naturally (no break) — advance sampler epoch.
+                if self.sampler is not None:
+                    self.sampler.start_new_epoch()
+                continue
 
             if len(self.loader) == 0:
                 break
