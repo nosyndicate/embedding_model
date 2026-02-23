@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import torch
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, Sampler
 from torch.utils.data.distributed import DistributedSampler
 
 from embedding_trainer.data.base import CollatorProtocol, DatasetProtocol
@@ -59,6 +59,7 @@ def create_dataloader(
     dataset: DatasetProtocol | Dataset[Any],
     collator: CollatorProtocol | Callable[[list[dict[str, Any]]], Any],
     config: DataLoaderConfig | None = None,
+    sampler: Sampler | None = None,
 ) -> DataLoader:
     """
     Create a DataLoader for the given dataset and collator.
@@ -67,6 +68,7 @@ def create_dataloader(
         dataset: Map-style dataset to load from
         collator: Collator function to batch samples
         config: DataLoader configuration
+        sampler: Optional sampler (mutually exclusive with shuffle)
 
     Returns:
         Configured DataLoader instance
@@ -75,7 +77,11 @@ def create_dataloader(
         config = DataLoaderConfig()
 
     loader_kwargs = _build_loader_kwargs(config, collator)
-    loader_kwargs["shuffle"] = config.shuffle
+
+    if sampler is not None:
+        loader_kwargs["sampler"] = sampler
+    else:
+        loader_kwargs["shuffle"] = config.shuffle
 
     return DataLoader(dataset, **loader_kwargs)
 
