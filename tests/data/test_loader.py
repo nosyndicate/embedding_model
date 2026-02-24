@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import random
+
+import numpy as np
 import pytest
 import torch
 from torch import Tensor
@@ -72,6 +75,33 @@ class TestCreateDataLoader:
         )
         batch = next(iter(loader))
         assert batch["input_ids"].shape == (4,)
+        assert loader.generator is not None
+
+    def test_worker_init_fn_is_set_when_num_workers_positive(self) -> None:
+        ds = DummyDataset()
+        loader = create_dataloader(
+            ds,
+            collator,
+            DataLoaderConfig(num_workers=2, batch_size=4, seed=123),
+        )
+        assert loader.worker_init_fn is not None
+
+    def test_worker_init_fn_seeds_rng_deterministically(self) -> None:
+        ds = DummyDataset()
+        loader = create_dataloader(
+            ds,
+            collator,
+            DataLoaderConfig(num_workers=1, batch_size=4, seed=9876),
+        )
+        assert loader.worker_init_fn is not None
+
+        loader.worker_init_fn(3)
+        first = (random.random(), float(np.random.rand()), float(torch.rand(())))
+
+        loader.worker_init_fn(3)
+        second = (random.random(), float(np.random.rand()), float(torch.rand(())))
+
+        assert first == second
 
 
 class TestCreateDistributedDataLoader:

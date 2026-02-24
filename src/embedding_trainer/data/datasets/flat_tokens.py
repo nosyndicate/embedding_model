@@ -243,6 +243,7 @@ class FlatTokenDataset(Dataset):
         return {
             # Convert to int32 tensor for PyTorch (torch.uint16 has limited support)
             "input_ids": torch.from_numpy(seq_tokens.astype(np.int32)),
+            "sample_idx": torch.tensor(idx, dtype=torch.int64),
         }
 
     def set_epoch(self, epoch: int) -> None:

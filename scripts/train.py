@@ -66,7 +66,14 @@ def main(cfg: DictConfig) -> None:
     )
 
     collator_class = COLLATOR_REGISTRY.get(cfg.collator.name)
-    collator = collator_class(MLMCollatorConfig.from_tokenizer(tokenizer))
+    collator = collator_class(
+        MLMCollatorConfig.from_tokenizer(
+            tokenizer,
+            seed=cfg.training.seed,
+            mlm_probability=cfg.collator.mlm_probability,
+            epoch=0,
+        )
+    )
 
     task = TASK_REGISTRY.get(cfg.task.name)()
     model = MODEL_REGISTRY.get(cfg.model.name)(
@@ -86,6 +93,8 @@ def main(cfg: DictConfig) -> None:
         callbacks.append(cb_cls(**cb_kwargs))
 
     sampler = ResumableSampler(dataset, seed=cfg.training.seed)
+    if hasattr(collator, "set_epoch"):
+        collator.set_epoch(sampler.epoch)
 
     loader = create_dataloader(
         dataset=dataset,
@@ -96,6 +105,7 @@ def main(cfg: DictConfig) -> None:
             prefetch_factor=cfg.training.prefetch_factor,
             pin_memory=torch.cuda.is_available(),
             drop_last=True,
+            seed=cfg.training.seed,
         ),
         sampler=sampler,
     )
@@ -118,6 +128,7 @@ def main(cfg: DictConfig) -> None:
             pin_memory=torch.cuda.is_available(),
             drop_last=False,
             shuffle=False,
+            seed=cfg.training.seed,
         ),
     )
 
