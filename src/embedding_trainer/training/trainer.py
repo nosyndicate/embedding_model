@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import math
+import random
 import re
 from pathlib import Path
+from typing import Any
 
+import numpy as np
 import torch
 
 from embedding_trainer.core import BaseCallback, BaseTask, EvalOutput, TrainOutput
@@ -55,6 +58,7 @@ class SimpleTrainer(BaseTrainer):
             callback.on_train_begin(self)
 
         while self.global_step < self.max_steps:
+            self._sync_data_epoch()
             for batch in self.loader:
                 if self.global_step >= self.max_steps:
                     break
@@ -159,6 +163,7 @@ class SimpleTrainer(BaseTrainer):
             "global_step": self.global_step,
             "cumulative_loss_sum": self.cumulative_loss_sum,
             "cumulative_loss_steps": self.cumulative_loss_steps,
+            **self._capture_rng_state(),
         }
         if self.scheduler is not None:
             checkpoint["scheduler_state_dict"] = self.scheduler.state_dict()
@@ -182,6 +187,8 @@ class SimpleTrainer(BaseTrainer):
             self.scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
         if self.sampler is not None and "sampler_state_dict" in checkpoint:
             self.sampler.load_state_dict(checkpoint["sampler_state_dict"])
+        self._restore_rng_state(checkpoint)
+        self._sync_data_epoch()
 
     @staticmethod
     def latest_checkpoint(checkpoint_dir: str | Path) -> Path | None:
@@ -197,3 +204,76 @@ class SimpleTrainer(BaseTrainer):
                 if best is None or step > best[0]:
                     best = (step, p)
         return best[1] if best is not None else None
+
+    def _capture_rng_state(self) -> dict[str, Any]:
+        numpy_state = np.random.get_state()
+        state: dict[str, Any] = {
+            "python_rng_state": random.getstate(),
+            "numpy_rng_state": {
+                "bit_generator": numpy_state[0],
+                "state": numpy_state[1].tolist(),
+                "pos": int(numpy_state[2]),
+                "has_gauss": int(numpy_state[3]),
+                "cached_gaussian": float(numpy_state[4]),
+            },
+            "torch_rng_state": torch.get_rng_state(),
+        }
+        if torch.cuda.is_available():
+            state["torch_cuda_rng_state_all"] = torch.cuda.get_rng_state_all()
+        return state
+
+    def _restore_rng_state(self, checkpoint: dict[str, Any]) -> None:
+        if "python_rng_state" in checkpoint:
+            random.setstate(checkpoint["python_rng_state"])
+
+        numpy_state = checkpoint.get("numpy_rng_state")
+        if numpy_state is not None:
+            if isinstance(numpy_state, dict):
+                np_state = (
+                    numpy_state["bit_generator"],
+                    np.asarray(numpy_state["state"], dtype=np.uint32),
+                    int(numpy_state["pos"]),
+                    int(numpy_state["has_gauss"]),
+                    float(numpy_state["cached_gaussian"]),
+                )
+            else:
+                # Backward-compatible fallback for tuple/list payloads.
+                np_state = (
+                    numpy_state[0],
+                    np.asarray(numpy_state[1], dtype=np.uint32),
+                    int(numpy_state[2]),
+                    int(numpy_state[3]),
+                    float(numpy_state[4]),
+                )
+            np.random.set_state(np_state)
+
+        if "torch_rng_state" in checkpoint:
+            torch_rng_state = checkpoint["torch_rng_state"]
+            if isinstance(torch_rng_state, torch.Tensor):
+                torch_rng_state = torch_rng_state.detach().to(
+                    device="cpu", dtype=torch.uint8
+                )
+            torch.set_rng_state(torch_rng_state)
+
+        if torch.cuda.is_available() and "torch_cuda_rng_state_all" in checkpoint:
+            cuda_states = checkpoint["torch_cuda_rng_state_all"]
+            normalized_states = []
+            for state in cuda_states:
+                if isinstance(state, torch.Tensor):
+                    normalized_states.append(
+                        state.detach().to(device="cpu", dtype=torch.uint8)
+                    )
+                else:
+                    normalized_states.append(state)
+            torch.cuda.set_rng_state_all(normalized_states)
+
+    def _sync_data_epoch(self) -> None:
+        if self.sampler is None:
+            return
+        epoch = self.sampler.epoch
+        dataset = getattr(self.loader, "dataset", None)
+        if dataset is not None and hasattr(dataset, "set_epoch"):
+            dataset.set_epoch(epoch)
+        collate_fn = getattr(self.loader, "collate_fn", None)
+        if collate_fn is not None and hasattr(collate_fn, "set_epoch"):
+            collate_fn.set_epoch(epoch)

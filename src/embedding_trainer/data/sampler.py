@@ -41,6 +41,11 @@ class ResumableSampler(Sampler[int]):
     def __len__(self) -> int:
         return self._num_samples
 
+    @property
+    def epoch(self) -> int:
+        """Current sampler epoch."""
+        return self._epoch
+
     def __iter__(self) -> Iterator[int]:
         # Yield remaining indices from the current epoch.
         # No state mutation here — advance() and start_new_epoch() handle that.
@@ -83,4 +88,11 @@ class ResumableSampler(Sampler[int]):
 
     def advance(self, n: int) -> None:
         """Advance the position by *n* samples (call once per batch)."""
+        if n < 0:
+            raise ValueError(f"advance expects non-negative n, got {n}")
         self._start_index += n
+        if self._start_index > self._num_samples:
+            raise ValueError(
+                "ResumableSampler.advance moved past end of epoch "
+                f"({self._start_index} > {self._num_samples})."
+            )

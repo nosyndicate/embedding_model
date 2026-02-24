@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from embedding_trainer.data.sampler import ResumableSampler
 
 
@@ -106,12 +108,14 @@ class TestResumableSampler:
         s = ResumableSampler(ds, seed=0)
 
         assert s.state_dict()["epoch"] == 0
+        assert s.epoch == 0
 
         # Exhaust epoch 0 and explicitly advance
         _ = list(s)
         s.start_new_epoch()
 
         assert s.state_dict()["epoch"] == 1
+        assert s.epoch == 1
         assert s.state_dict()["index"] == 0
 
     def test_cross_epoch_permutations_differ(self) -> None:
@@ -126,3 +130,15 @@ class TestResumableSampler:
 
         assert epoch0 != epoch1
         assert sorted(epoch0) == sorted(epoch1)
+
+    def test_advance_rejects_negative_values(self) -> None:
+        ds = _FakeDataset(10)
+        s = ResumableSampler(ds, seed=0)
+        with pytest.raises(ValueError, match="non-negative"):
+            s.advance(-1)
+
+    def test_advance_rejects_past_end_of_epoch(self) -> None:
+        ds = _FakeDataset(10)
+        s = ResumableSampler(ds, seed=0)
+        with pytest.raises(ValueError, match="past end of epoch"):
+            s.advance(11)

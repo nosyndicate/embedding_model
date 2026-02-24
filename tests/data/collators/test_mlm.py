@@ -38,8 +38,13 @@ def collator(mlm_config: MLMCollatorConfig) -> MLMCollator:
     return MLMCollator(mlm_config)
 
 
-def make_sample(token_ids: list[int]) -> dict[str, torch.Tensor]:
-    return {"input_ids": torch.tensor(token_ids, dtype=torch.long)}
+def make_sample(
+    token_ids: list[int], *, sample_idx: int = 0
+) -> dict[str, torch.Tensor]:
+    return {
+        "input_ids": torch.tensor(token_ids, dtype=torch.long),
+        "sample_idx": torch.tensor(sample_idx, dtype=torch.int64),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -127,7 +132,6 @@ class TestMaskTokens:
         assert (labels == LABEL_IGNORE_ID).all().item()
 
     def test_labels_minus_100_for_unmasked(self, collator: MLMCollator) -> None:
-        torch.manual_seed(0)
         input_ids = self._make_input([CLS_ID, 10, 20, 30, 40, SEP_ID, PAD_ID, PAD_ID])
         _, labels = collator._mask_tokens(input_ids)
         # Positions not replaced by [MASK] must have label LABEL_IGNORE_ID
@@ -135,6 +139,31 @@ class TestMaskTokens:
         for pos in range(labels.shape[1]):
             if not masked_positions[0, pos]:
                 assert labels[0, pos].item() == LABEL_IGNORE_ID
+
+    def test_deterministic_for_same_sample_and_epoch(
+        self, collator: MLMCollator
+    ) -> None:
+        input_ids = self._make_input([CLS_ID] + list(range(10, 74)) + [SEP_ID])
+        sample_idx = torch.tensor([123], dtype=torch.int64)
+
+        masked_1, labels_1 = collator._mask_tokens(input_ids, sample_idx)
+        masked_2, labels_2 = collator._mask_tokens(input_ids, sample_idx)
+
+        assert torch.equal(masked_1, masked_2)
+        assert torch.equal(labels_1, labels_2)
+
+    def test_epoch_changes_mask_pattern(self, collator: MLMCollator) -> None:
+        input_ids = self._make_input([CLS_ID] + list(range(10, 266)) + [SEP_ID])
+        sample_idx = torch.tensor([55], dtype=torch.int64)
+
+        collator.set_epoch(0)
+        _, labels_epoch0 = collator._mask_tokens(input_ids, sample_idx)
+        collator.set_epoch(1)
+        _, labels_epoch1 = collator._mask_tokens(input_ids, sample_idx)
+
+        masked0 = labels_epoch0 != LABEL_IGNORE_ID
+        masked1 = labels_epoch1 != LABEL_IGNORE_ID
+        assert not torch.equal(masked0, masked1)
 
     def test_masked_positions_get_mask_token(self, collator: MLMCollator) -> None:
         # Force all eligible tokens to be masked
@@ -174,7 +203,6 @@ class TestMaskTokens:
         assert labels[0, 2].item() == 20
 
     def test_masking_probability(self, collator: MLMCollator) -> None:
-        torch.manual_seed(42)
         # Large sequence of eligible tokens to get stable statistics
         eligible_tokens = list(range(10, 90))  # 80 tokens, none are special
         input_ids = self._make_input([CLS_ID] + eligible_tokens + [SEP_ID])

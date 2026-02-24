@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import random
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from typing import Any
 
+import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset, Sampler
 from torch.utils.data.distributed import DistributedSampler
@@ -23,6 +26,7 @@ class DataLoaderConfig:
     pin_memory: bool = True
     drop_last: bool = True
     shuffle: bool = True
+    seed: int = 0
 
     def __post_init__(self) -> None:
         if self.batch_size < 1:
@@ -41,18 +45,35 @@ def _build_loader_kwargs(
     collator: CollatorProtocol | Callable[[list[dict[str, Any]]], Any],
 ) -> dict[str, Any]:
     """Build common DataLoader kwargs."""
+    loader_generator = torch.Generator()
+    loader_generator.manual_seed(config.seed)
+
     loader_kwargs: dict[str, Any] = {
         "batch_size": config.batch_size,
         "collate_fn": collator,
         "num_workers": config.num_workers,
         "pin_memory": config.pin_memory and torch.cuda.is_available(),
         "drop_last": config.drop_last,
+        "generator": loader_generator,
     }
 
     if config.num_workers > 0:
         loader_kwargs["prefetch_factor"] = config.prefetch_factor
+        loader_kwargs["worker_init_fn"] = _build_worker_init_fn(config.seed)
 
     return loader_kwargs
+
+
+def _seed_worker(worker_id: int, seed: int) -> None:
+    worker_seed = seed + worker_id
+    random.seed(worker_seed)
+    np.random.seed(worker_seed % (2**32))
+    torch.manual_seed(worker_seed)
+
+
+def _build_worker_init_fn(seed: int) -> Callable[[int], None]:
+    """Build a worker seeding function for deterministic worker-local RNG."""
+    return partial(_seed_worker, seed=seed)
 
 
 def create_dataloader(
